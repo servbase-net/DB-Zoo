@@ -12,14 +12,14 @@ export function DatabaseWorkspaceLayout({
 }) {
   if (!sidebar) {
     return (
-      <div className="h-[calc(100vh-140px)] min-h-[560px] overflow-hidden rounded-md border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
+      <div className="h-full min-h-0 overflow-hidden rounded-md border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
         {main}
       </div>
     );
   }
 
   return (
-    <div className="h-[calc(100vh-140px)] min-h-[560px] overflow-hidden rounded-md border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
+    <div className="h-full min-h-0 overflow-hidden rounded-md border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
       <Group orientation="horizontal" className="h-full">
         <Panel defaultSize={24} minSize={18} maxSize={36} className="min-w-0">
           {sidebar}
