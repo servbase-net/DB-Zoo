@@ -1,16 +1,19 @@
 ﻿"use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Play } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Clock, Play, Search, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
 import { useActiveSession } from "@/hooks/use-active-session";
 import { useActiveDbContext } from "@/hooks/use-active-db-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
 import { classifyQueryRisk } from "@/lib/db/query-safety";
+import { cn } from "@/lib/utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -30,45 +33,149 @@ type HistoryItem = {
 };
 
 const defaultQuery = "SELECT * FROM customers LIMIT 50;";
+const MONACO_COLORS = {
+  dark: {
+    bg:        "#0b111ec7",
+    fg:        "#f5f5f5",
+    muted:     "#a3a3a3",
+    border:    "#262626",
+    selection: "#264f78",
+    lineHL:    "#1b263dd5",
+  },
+  light: {
+    bg:        "#ffffff",
+    fg:        "#171717",
+    muted:     "#737373",
+    border:    "#e5e5e5",
+    selection: "#cce2ff",
+    lineHL:    "#f8f8f8",
+  },
+} as const;
+
+const THEME_DARK  = "dbzoo-dark";
+const THEME_LIGHT = "dbzoo-light";
 
 export function QueryWorkbench() {
   const { sessionId } = useActiveSession();
   const { database, schema } = useActiveDbContext();
-  const [query, setQuery] = useState(defaultQuery);
-  const [result, setResult] = useState<QueryResultPayload | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { resolvedTheme } = useTheme();
+
+  const [query, setQuery]         = useState(defaultQuery);
+  const [result, setResult]       = useState<QueryResultPayload | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [history, setHistory]     = useState<HistoryItem[]>([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [confirmOpen, setConfirmOpen]     = useState(false);
+
+  // Keep a stable ref to the Monaco namespace so the theme-sync effect can
+  // call setTheme directly on the live instance without re-mounting the editor.
+  const monacoRef = useRef<any>(null);
+
   const risk = useMemo(() => classifyQueryRisk(query), [query]);
+
+  const filteredHistory = useMemo(() => {
+    const term = historySearch.trim().toLowerCase();
+    if (!term) return history;
+    return history.filter((e) => e.queryText.toLowerCase().includes(term));
+  }, [history, historySearch]);
 
   const loadHistory = useCallback(async () => {
     if (!sessionId) return;
-    const res = await fetch(`/api/query?sessionId=${sessionId}`);
+    const res     = await fetch(`/api/query?sessionId=${sessionId}`);
     const payload = await res.json();
     if (payload.ok) setHistory(payload.data);
   }, [sessionId]);
 
-  useEffect(() => {
-    loadHistory();
-  }, [sessionId, loadHistory]);
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
 
+  // ─── Define both Monaco themes upfront ───────────────────────────────────
+  const defineMonacoThemes = useCallback((monaco: any) => {
+    const define = (name: string, isDark: boolean) => {
+      const c = isDark ? MONACO_COLORS.dark : MONACO_COLORS.light;
+      monaco.editor.defineTheme(name, {
+        base: isDark ? "vs-dark" : "vs",
+        inherit: true,
+        rules: [],
+        colors: {
+          "editor.background":                   c.bg,
+          "editor.foreground":                   c.fg,
+          "editorLineNumber.foreground":         c.muted,
+          "editorLineNumber.activeForeground":   c.fg,
+          "editor.lineHighlightBackground":      c.lineHL,
+          "editor.selectionBackground":          c.selection,
+          "editor.inactiveSelectionBackground":  c.selection,
+          "editorCursor.foreground":             c.fg,
+          "editorIndentGuide.background1":       c.border,
+          "editorIndentGuide.activeBackground1": c.muted,
+          "editorBracketMatch.background":       c.selection,
+          "editorBracketMatch.border":           c.muted,
+        },
+      });
+    };
+    define(THEME_DARK,  true);
+    define(THEME_LIGHT, false);
+  }, []);
+
+  // ─── Sync Monaco theme whenever the app theme changes ────────────────────
+  // This fires instantly on toggle because monacoRef.current is already set
+  // from the onMount callback. No dynamic import, no page reload needed.
+  useEffect(() => {
+    if (!monacoRef.current) return;
+    monacoRef.current.editor.setTheme(
+      resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT
+    );
+  }, [resolvedTheme]);
+
+  // ─── Editor mount ─────────────────────────────────────────────────────────
+  const handleEditorMount = useCallback(
+    (editor: any, monaco: any) => {
+      // Store monaco namespace for the theme-sync effect above
+      monacoRef.current = monaco;
+
+      // Define both themes once, then activate the right one immediately
+      defineMonacoThemes(monaco);
+      monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
+
+      editor.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+        () => void run()
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [defineMonacoThemes, resolvedTheme]
+    // `run` omitted intentionally — the command captures the ref-stable version
+    // to avoid remounting the editor every time `risk` or `query` changes.
+  );
+
+  // ─── Query execution ──────────────────────────────────────────────────────
   const runUnsafe = useCallback(async () => {
     if (!sessionId) {
       toast.error("No active session");
       return;
     }
-    const res = await fetch("/api/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, query, database: database || undefined, schema: schema || undefined }),
-    });
-    const payload = await res.json();
-    if (!payload.ok) {
-      toast.error(payload.error ?? "Query failed");
-      return;
+    setIsRunning(true);
+    try {
+      const res     = await fetch("/api/query", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          sessionId,
+          query,
+          database: database || undefined,
+          schema:   schema   || undefined,
+        }),
+      });
+      const payload = await res.json();
+      if (!payload.ok) {
+        toast.error(payload.error ?? "Query failed");
+        return;
+      }
+      setResult(payload.data);
+      toast.success(`Executed in ${payload.data.durationMs}ms`);
+      void loadHistory();
+    } finally {
+      setIsRunning(false);
     }
-    setResult(payload.data);
-    toast.success(`Executed in ${payload.data.durationMs}ms`);
-    loadHistory();
   }, [sessionId, query, database, schema, loadHistory]);
 
   const run = useCallback(async () => {
@@ -79,17 +186,13 @@ export function QueryWorkbench() {
     await runUnsafe();
   }, [risk, runUnsafe]);
 
-  useEffect(() => {
-    const onHotkey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        event.preventDefault();
-        run();
-      }
-    };
-    window.addEventListener("keydown", onHotkey);
-    return () => window.removeEventListener("keydown", onHotkey);
-  }, [run]);
+  // ─── Result columns ───────────────────────────────────────────────────────
+  const resultColumns = useMemo(() => {
+    if (!result) return [];
+    return result.columns ?? Object.keys(result.rows?.[0] ?? {});
+  }, [result]);
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
       <ConfirmModal
@@ -105,59 +208,106 @@ export function QueryWorkbench() {
           void runUnsafe();
         }}
       />
-      <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>SQL Editor</CardTitle>
-            <Button onClick={run}>
-              <Play className="mr-2 h-4 w-4" />
-              Run (Ctrl/Cmd+Enter)
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {risk === "destructive" ? (
-              <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                Destructive statement detected. Confirm before execution.
-              </div>
-            ) : null}
-            <MonacoEditor
-              language="sql"
-              value={query}
-              onChange={(value) => setQuery(value ?? "")}
-              height="320px"
-              options={{ minimap: { enabled: false }, fontSize: 14 }}
-            />
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Result</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {result ? (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Execution time: {result.durationMs}ms
-                  {typeof result.affectedRows === "number" ? ` - affected rows: ${result.affectedRows}` : ""}
-                </p>
-                {result.rows ? (
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+
+        {/* ── Left column ───────────────────────────────────────────────── */}
+        <div className="min-w-0 space-y-4">
+
+          {/* SQL Editor */}
+          <Card>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>SQL Editor</CardTitle>
+              <Button
+                onClick={() => void run()}
+                disabled={isRunning}
+                className="w-full sm:w-auto"
+              >
+                <Play className="mr-2 h-4 w-4" />
+                {isRunning ? "Running…" : "Run (Ctrl/Cmd+Enter)"}
+              </Button>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {risk === "destructive" && (
+                <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  Destructive statement detected — confirm before execution.
+                </div>
+              )}
+
+              <div className="overflow-hidden rounded-lg border border-border">
+                <MonacoEditor
+                  language="sql"
+                  value={query}
+                  onChange={(v) => setQuery(v ?? "")}
+                  onMount={handleEditorMount}
+                  height="300px"
+                  // Do NOT pass the `theme` prop — we manage it entirely via
+                  // monacoRef so the prop never overwrites our setTheme calls.
+                  theme={undefined}
+                  options={{
+                    minimap:              { enabled: false },
+                    fontSize:             13,
+                    automaticLayout:      true,
+                    scrollBeyondLastLine: false,
+                    wordWrap:             "on",
+                    padding:              { top: 12, bottom: 12 },
+                    lineNumbers:          "on",
+                    folding:              false,
+                    renderLineHighlight:  "line",
+                    overviewRulerLanes:   0,
+                    hideCursorInOverviewRuler: true,
+                    scrollbar: {
+                      vertical:                "auto",
+                      horizontal:              "auto",
+                      verticalScrollbarSize:   6,
+                      horizontalScrollbarSize: 6,
+                    },
+                  }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Result */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Result</CardTitle>
+              {result && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  {result.durationMs}ms
+                  {typeof result.affectedRows === "number" && (
+                    <> · {result.affectedRows} row{result.affectedRows !== 1 ? "s" : ""} affected</>
+                  )}
+                </span>
+              )}
+            </CardHeader>
+
+            <CardContent>
+              {result ? (
+                result.rows?.length ? (
                   <div className="overflow-auto rounded-lg border border-border">
-                    <Table>
+                    <Table className="min-w-max">
                       <THead>
                         <tr>
-                          {(result.columns ?? Object.keys(result.rows[0] ?? {})).map((col) => (
+                          {resultColumns.map((col) => (
                             <TH key={col}>{col}</TH>
                           ))}
                         </tr>
                       </THead>
                       <TBody>
-                        {result.rows.map((row, idx) => (
+                        {result.rows!.map((row, idx) => (
                           <tr key={idx}>
-                            {Object.values(row).map((value, colIdx) => (
-                              <TD key={colIdx}>{String(value ?? "")}</TD>
+                            {resultColumns.map((col) => (
+                              <TD
+                                key={`${idx}-${col}`}
+                                className="max-w-[260px] truncate"
+                                title={String(row[col] ?? "")}
+                              >
+                                {String(row[col] ?? "")}
+                              </TD>
                             ))}
                           </tr>
                         ))}
@@ -165,36 +315,75 @@ export function QueryWorkbench() {
                     </Table>
                   </div>
                 ) : (
-                  <p className="text-sm">Statement executed successfully.</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Run a query to see results.</p>
-            )}
-          </CardContent>
-        </Card>
+                  <p className="text-sm text-muted-foreground">
+                    Statement executed successfully.
+                  </p>
+                )
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Run a query to see results.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        <Card>
-          <CardHeader>
+        {/* ── Right column — History ─────────────────────────────────────── */}
+        <Card className="flex min-w-0 flex-col xl:h-[calc(100vh-240px)]">
+          <CardHeader className="space-y-3 pb-3">
             <CardTitle>Query History</CardTitle>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Search history…"
+                className="pl-9"
+              />
+            </div>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {history.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                className="w-full rounded-lg border border-border p-2 text-left hover:bg-muted"
-                onClick={() => setQuery(entry.queryText)}
-              >
-                <p className="line-clamp-2 text-xs">{entry.queryText}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {new Date(entry.executedAt).toLocaleString()} - {entry.durationMs}ms
+
+          <CardContent className="flex min-h-0 flex-1 flex-col">
+            <div className="flex-1 space-y-1.5 overflow-auto xl:max-h-[calc(100vh-360px)]">
+              {filteredHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {historySearch ? "No matching queries found." : "No query history yet."}
                 </p>
-              </button>
-            ))}
+              ) : (
+                filteredHistory.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => setQuery(entry.queryText)}
+                    className="group w-full rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted"
+                  >
+                    <p className="line-clamp-2 break-all font-mono text-xs leading-relaxed">
+                      {entry.queryText}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span>{new Date(entry.executedAt).toLocaleString()}</span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium",
+                          entry.success
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                            : "bg-destructive/10 text-destructive"
+                        )}
+                      >
+                        {entry.success
+                          ? <CheckCircle2 className="h-3 w-3" />
+                          : <XCircle className="h-3 w-3" />
+                        }
+                        {entry.durationMs}ms
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
           </CardContent>
         </Card>
+
       </div>
     </>
   );
