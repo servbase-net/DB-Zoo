@@ -2,3 +2,9 @@
 .next
 out
 .env
+prisma/migrations
+prisma/*.db
+prisma/*.db-journal
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
