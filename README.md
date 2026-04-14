@@ -143,7 +143,7 @@ db-zoo/
 
 This project is created by [Servbase](https://github.com/servbase-net).
 
-[![contributors](https://contrib.rocks/image?repo=servbase-net/db-zoo)](https://github.com/servbase-net/db-zoo/graphs/contributors)
+[![contributors](https://contrib.rocks/image?repo=servbase-net/DB-Zoo)](https://github.com/servbase-net/db-zoo/graphs/contributors)
 ---
 
 💖☕ by [Servbase.net](https://servbase.net)
