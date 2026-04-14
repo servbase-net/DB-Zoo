@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AppUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  displayName  String?
+  passwordHash String
+  role         String   @default("operator")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model SavedConnection {
+  id                String   @id @default(cuid())
+  name              String
+  engine            String
+  host              String?
+  port              Int?
+  username          String?
+  encryptedPassword String?
+  databaseName      String?
+  sqlitePath        String?
+  readOnly          Boolean  @default(false)
+  tags              String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  queryHistory      QueryHistory[]
+}
+
+model ConnectionSession {
+  id                 String   @id
+  label              String
+  engine             String
+  host               String?
+  port               Int?
+  username           String?
+  encryptedPassword  String?
+  databaseName       String?
+  sqlitePath         String?
+  readOnly           Boolean  @default(false)
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model QueryHistory {
+  id                 String   @id @default(cuid())
+  sessionId          String
+  savedConnectionId  String?
+  engine             String
+  queryText          String
+  durationMs         Int
+  affectedRows       Int?
+  success            Boolean
+  errorMessage       String?
+  executedAt         DateTime @default(now())
+  savedConnection    SavedConnection? @relation(fields: [savedConnectionId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorRole     String
+  action        String
+  resourceType  String
+  resourceId    String
+  payload       String?
+  createdAt     DateTime @default(now())
+}
