@@ -1,7 +1,7 @@
-# DB Zoo
+﻿# DB Zoo
 
 Modern phpMyAdmin-inspired database panel built with Next.js App Router + TypeScript.
-DB Zoo is a project by Servbase.
+DB Zoo is an open-source project by Servbase.
 
 ## Stack
 - Next.js 14 (App Router)

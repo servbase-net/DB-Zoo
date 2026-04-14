@@ -75,7 +75,7 @@ export function LoginForm() {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-8">
-      <section className="relative overflow-hidden rounded-3xl px-6 py-10 backdrop-blur-xl sm:px-10">
+      <section className="relative overflow-hidden rounded-3xl px-6 py-10 pb-0 backdrop-blur-xl sm:px-10">
         <div className="pointer-events-none absolute inset-0 " />
         <div className="relative flex flex-col items-center">
           <Image
@@ -87,7 +87,7 @@ export function LoginForm() {
             draggable={false}
             priority
           />
-          <p className="mt-5 max-w-2xl text-center text-sm font-medium text-muted-foreground sm:text-base">
+          <p className="mt-5 max-w-2xl text-center text-md font-semibold text-muted-foreground">
             Connect to MySQL, MariaDB, PostgreSQL, and SQLite in one clean workspace.
           </p>
         </div>
@@ -203,14 +203,14 @@ export function LoginForm() {
         </CardContent>
       </Card>
 
-      <footer className="rounded-2xl border border-border/60 bg-card/70 px-5 py-4 shadow-sm backdrop-blur">
-        <div className="flex items-center justify-center gap-3">
-          <Image src="/branding/servbase.png" alt="Servbase logo" width={38} height={38} className="h-9 w-9" />
+      <footer className="rounded-2xl px-5 py-4 flex items-center justify-center ">
+        <a href="https://servbase.net" target="_blank" className="flex items-center justify-center gap-3 select-none">
+          <Image draggable={false} src="/branding/servbase.png" alt="Servbase logo" width={80} height={80} className="h-15 w-15" />
           <div className="leading-tight">
             <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Powered By</p>
             <p className="text-base font-semibold text-foreground">Servbase</p>
           </div>
-        </div>
+        </a>
       </footer>
     </div>
   );
