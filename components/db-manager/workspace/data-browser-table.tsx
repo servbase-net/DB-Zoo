@@ -62,7 +62,7 @@ export function DataBrowserTable({
   loading?: boolean;
 }) {
   return (
-    <div className="flex-1 overflow-auto rounded-md border border-neutral-200 shadow-sm dark:border-neutral-800">
+    <div className="flex-1 overflow-auto dark:border-neutral-800">
       <Table className="min-w-max">
         <THead>
           <tr>
