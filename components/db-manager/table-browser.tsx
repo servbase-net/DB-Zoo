@@ -360,9 +360,34 @@ export function TableBrowser({
       toast.error(payload.error ?? "Update failed");
       return;
     }
+    // Comment out, this works but flickers. replaced with better
+    // setEditingCell(null);
+    // toast.success("Cell updated");
+    // await loadRows();
+
+    setRows((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        rows: prev.rows.map((currentRow) => {
+          const matches = primaryKeys.every(
+            (key) => currentRow[key] === editingCell.row[key]
+          );
+
+          if (!matches) return currentRow;
+
+          return {
+            ...currentRow,
+            [editingCell.column]: nextValue,
+          };
+        }),
+      };
+    });
+
     setEditingCell(null);
     toast.success("Cell updated");
-    await loadRows();
+
   }
 
   async function executeScopedTableQuery(
