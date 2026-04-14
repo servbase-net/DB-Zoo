@@ -1,75 +1,149 @@
-﻿# DB Zoo
+﻿<p align="center">
+  <img src="./public/branding/db-zoo-2.png" alt="DB Zoo" width="250" />
+</p>
 
-Modern phpMyAdmin-inspired database panel built with Next.js App Router + TypeScript.
-DB Zoo is an open-source project by Servbase.
+> **Modern phpMyAdmin-inspired database management tool** built with Next.js App Router and TypeScript.
 
-## Stack
-- Next.js 14 (App Router)
-- TypeScript
-- Tailwind CSS
-- Prisma (metadata DB)
-- Zod validation
-- Route Handlers for backend operations
-- Provider abstraction for multi-engine support
+---
 
-## Supported Engines
-- MySQL (`mysql2`)
-- MariaDB (`mysql2` provider specialization)
-- PostgreSQL (`pg`)
-- SQLite (`better-sqlite3`)
-- MongoDB architecture hooks reserved via provider interface extension
+> [!NOTE]
+> DB Zoo is designed to be a **lightweight, developer-friendly alternative** to traditional database GUIs — fast, extensible, and web-first.
 
-## MVP Features Implemented
-- phpMyAdmin-style connection/login shell (no user account required)
-- Temporary connection sessions (cookie + session table)
-- Optional encrypted saved connections
-- Connection test, reconnect, and saved connection management
-- Schema explorer (database/schema/object tree)
-- Table browser: columns, indexes, foreign keys, rows, triggers placeholder
-- Row operations: insert, duplicate, delete (update API foundation included)
-- SQL editor with Monaco, destructive-query warning, history, execution stats
-- Import/Export endpoints (CSV/SQL)
-- Table designer scaffold
-- Server metadata panel
-- Query history + audit log persistence structures
-- Role/permission scaffolding (`admin`, `operator`, `read_only`)
+---
 
-## Project Structure
-- `app/` App Router pages + API route handlers
-- `components/db-manager/` feature UI components
-- `components/ui/` reusable UI primitives
-- `lib/db/providers/` provider abstraction and engine providers
-- `lib/services/` service layer (UI-free backend logic)
-- `lib/validation/` Zod schemas
-- `lib/security/` encryption + permission scaffolding
-- `lib/session/` connection session handling
-- `prisma/` metadata schema
+## 🚀 Features
 
-## Environment
-Create `.env`:
+- 🌐 Web-based database management (no install needed)
+- 🔌 Multi-database support (MySQL, PostgreSQL, SQLite, etc.)
+- 🧠 Smart query editor with Monaco + history + safety checks
+- 🗂️ Schema explorer (tables, indexes, relations)
+- ✏️ Row-level operations (insert, delete, duplicate)
+- 🔐 Secure credential handling (encrypted storage)
+- ⚡ Fast, minimal, and developer-friendly UI
+- 🧩 Provider abstraction for easy engine extension
 
-```bash
-DATABASE_URL="file:./prisma/dev.db"
-APP_ENCRYPTION_KEY="dev-32-byte-minimum-secret-key-12345"
-SESSION_SECRET="dev-session-secret"
-```
+---
 
-## Run
+## ❓ Why DB Zoo?
+
+Traditional tools like phpMyAdmin are powerful, but often **clunky, outdated, or tied to specific stacks**.
+
+DB Zoo takes a modern approach:
+
+- ⚡ Built with **Next.js App Router**
+- 🧩 Designed for **multi-database extensibility**
+- 🎯 Focused on **developer experience**
+- 🔐 Secure by default with encrypted credentials
+
+---
+
+## 📦 Installation
+
 ```bash
 npm install
 npm run prisma:generate
 npm run dev
 ```
 
-Build check:
+---
+
+## 🏃 Run
+
+```bash
+npm run dev
+```
+
+Open your browser and start managing your databases.
+
+---
+
+## 🏗️ Build
+
 ```bash
 npm run build
 ```
 
-## Notes
-- Credentials are encrypted on save and never returned to clients.
-- Read-only connections block destructive queries and write mutations.
-- Real provider calls exist for core metadata/query paths; some DDL/mutation/import paths are intentionally scaffolded and marked for deeper engine-specific implementations.
-- Metadata DB is intentionally separate from managed DB connections.
+---
 
+## ⚙️ Environment
 
+Create a `.env` file:
+
+```env
+DATABASE_URL="file:./prisma/dev.db"
+APP_ENCRYPTION_KEY="dev-32-byte-minimum-secret-key-12345"
+SESSION_SECRET="dev-session-secret"
+```
+
+---
+
+> [!IMPORTANT]
+> - `APP_ENCRYPTION_KEY` must be **at least 32 bytes**
+> - Never expose your `.env` in production
+
+---
+
+## 🧱 Tech Stack
+
+| Layer        | Technology                          |
+|-------------|------------------------------------|
+| Frontend    | Next.js 14 (App Router), Tailwind  |
+| Language    | TypeScript                         |
+| Backend     | Route Handlers (API)               |
+| Database    | Prisma (metadata DB)               |
+| Validation  | Zod                                |
+| Editor      | Monaco Editor                      |
+
+---
+
+## 🐘 Supported Engines
+
+| Database     | Driver             | Status |
+|-------------|-------------------|--------|
+| MySQL        | `mysql2`          | ✅     |
+| MariaDB      | `mysql2`          | ✅     |
+| PostgreSQL   | `pg`              | ✅     |
+| SQLite       | `better-sqlite3`  | ✅     |
+| MongoDB      | Planned           | 🔄     |
+
+---
+
+## 🧩 Project Structure
+
+```
+db-zoo/
+├── app/                    # Next.js App Router pages + API routes
+├── components/
+│   ├── db-manager/         # Database manager feature components
+│   └── ui/                 # Reusable UI components
+├── lib/
+│   ├── db/providers/       # Database engine abstractions
+│   ├── services/           # Core backend logic
+│   ├── validation/         # Zod schemas
+│   ├── security/           # Encryption & auth
+│   └── session/            # Session management
+├── prisma/                 # Metadata schema and ORM config
+├── public/                 # Static assets
+├── styles/                 # Global styles
+└── package.json
+```
+
+---
+
+## 📝 Notes
+
+- 🔐 Credentials are **encrypted on save** and never returned to clients
+- 🛡️ Read-only connections block destructive queries
+- 🧩 Some advanced operations are scaffolded for future engine-specific implementations
+- 🗃️ Metadata DB is **separate from managed connections**
+
+---
+
+## 📝 Author
+
+This project is created by [Servbase](https://github.com/servbase-net).
+
+[![contributors](https://contrib.rocks/image?repo=servbase-net/db-zoo)](https://github.com/servbase-net/db-zoo/graphs/contributors)
+---
+
+💖☕ by [Servbase.net](https://servbase.net)
