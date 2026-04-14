@@ -2,8 +2,8 @@
 .next
 out
 .env
-prisma/*.db
-prisma/*.db-journal
+*.db
+*.db-journal
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
