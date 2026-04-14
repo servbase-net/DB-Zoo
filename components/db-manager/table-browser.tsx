@@ -690,7 +690,7 @@ export function TableBrowser({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="columns" className="mt-2">
+                <TabsContent value="columns" className="mt-2 flex min-h-0 flex-1 flex-col">
                   <Card className="border-neutral-200 dark:border-neutral-800">
                     <CardContent className="p-0">
                       <Table>
@@ -719,7 +719,7 @@ export function TableBrowser({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="indexes" className="mt-2">
+                <TabsContent value="indexes" className="mt-2 flex min-h-0 flex-1 flex-col">
                   <Card className="border-neutral-200 dark:border-neutral-800">
                     <CardContent className="p-0">
                       <Table>
@@ -744,7 +744,7 @@ export function TableBrowser({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="fks" className="mt-2">
+                <TabsContent value="fks" className="mt-2 flex min-h-0 flex-1 flex-col">
                   <Card className="border-neutral-200 dark:border-neutral-800">
                     <CardContent className="p-0">
                       <Table>
@@ -771,7 +771,7 @@ export function TableBrowser({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="import" className="mt-2">
+                <TabsContent value="import" className="mt-2 flex min-h-0 flex-1 flex-col">
                   <Card className="border-neutral-200 dark:border-neutral-800">
                     <CardContent className="space-y-2 p-3">
                       <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
