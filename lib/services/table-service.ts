@@ -2,6 +2,39 @@ import { parse } from "csv-parse/sync";
 import { getProviderFromSession } from "@/lib/services/connection-service";
 import { writeAuditLog } from "@/lib/services/audit-service";
 
+function toMySQLDateTime(value: string | Date) {
+  const d = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(d.getTime())) {
+    return value;
+  }
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const seconds = String(d.getSeconds()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function normalizeRowDates(row: Record<string, unknown>) {
+  const next = { ...row };
+
+  for (const [key, value] of Object.entries(next)) {
+    if (
+      typeof value === "string" &&
+      value.includes("T") &&
+      /(_at|date|time)$/i.test(key)
+    ) {
+      next[key] = toMySQLDateTime(value);
+    }
+  }
+
+  return next;
+}
+
 export async function getTableMeta(
   sessionId: string,
   args: { database?: string; schema?: string; table: string },
@@ -34,7 +67,13 @@ export async function insertRow(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot insert rows");
-  await provider.insertRow(input, args);
+  const normalizedArgs = {
+    ...args,
+    row: normalizeRowDates(args.row),
+  };
+
+  await provider.insertRow(input, normalizedArgs);
+
   await writeAuditLog({
     actorRole: "operator",
     action: "row.insert",
@@ -56,7 +95,12 @@ export async function updateRow(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot update rows");
-  await provider.updateRow(input, args);
+  const normalizedArgs = {
+    ...args,
+    row: normalizeRowDates(args.row),
+  };
+
+  await provider.updateRow(input, normalizedArgs);
   await writeAuditLog({
     actorRole: "operator",
     action: "row.update",

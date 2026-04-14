@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Database, FolderTree, Table2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Database, FolderTree, Settings, Table2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useActiveSession } from "@/hooks/use-active-session";
 import { useActiveDbContext } from "@/hooks/use-active-db-context";
@@ -107,16 +107,35 @@ export function DatabaseTreeSidebar() {
 
   return (
     <aside className="overflow-y-auto border-r border-border bg-card/60 p-4 lg:h-screen">
-      <div className="mb-5 flex justify-center">
-        <Image
-          src="/branding/db-zoo-2.png"
-          alt="DB Zoo"
-          width={140}
-          height={60}
-          className="select-none"
-          draggable={false}
-          priority
-        />
+      <div className="mb-4">
+        <div className="flex items-center justify-between px-2 py-2">
+          {/* Left: Logo + Branding */}
+          <div className="flex items-center gap-2">
+            <Image
+              src="/logo.png"
+              alt="DB Zoo"
+              width={40}
+              height={40}
+              className="rounded-md"
+              draggable={false}
+              priority
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold">DB Zoo</span>
+              <span className="text-[11px] text-muted-foreground">
+                Database Explorer
+              </span>
+            </div>
+          </div>
+
+          {/* Right: Settings */}
+          <button className="rounded-md p-1.5 hover:bg-muted transition">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="mt-2 border-t border-border/60" />
       </div>
 
       <div className="pt-2">
