@@ -41,7 +41,7 @@ DB Zoo takes a modern approach:
 
 ```bash
 npm install
-npm run prisma:generate
+npx prisma migrate dev
 npm run dev
 ```
 
