@@ -23,12 +23,14 @@ function normalizeRowDates(row: Record<string, unknown>) {
   const next = { ...row };
 
   for (const [key, value] of Object.entries(next)) {
-    if (
-      typeof value === "string" &&
-      value.includes("T") &&
-      /(_at|date|time)$/i.test(key)
-    ) {
-      next[key] = toMySQLDateTime(value);
+    if (typeof value !== "string") continue;
+
+    const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
+    if (isoDatePattern.test(value)) {
+      const converted = toMySQLDateTime(value);
+      if (converted !== value) {
+        next[key] = converted;
+      }
     }
   }
 
