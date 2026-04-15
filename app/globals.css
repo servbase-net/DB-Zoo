@@ -1,4 +1,4 @@
-﻿@tailwind base;
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -6,7 +6,8 @@
   --background: 210 40% 98%;
   --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  --border: 214 32% 91%;
+  /* --border: 214 32% 91%; */
+  --border: 210 16% 82%;
   --muted: 210 40% 96%;
   --muted-foreground: 215 16% 46%;
   --primary: 200 90% 40%;
