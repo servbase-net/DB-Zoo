@@ -1,31 +1,45 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Database, Loader2, ShieldCheck } from "lucide-react";
+import {
+  Loader2,
+  ShieldCheck,
+  Server,
+  User,
+  Lock,
+  ChevronRight,
+  Database,
+  Code2,
+  Cpu,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useActiveSession } from "@/hooks/use-active-session";
 import type { DatabaseEngine } from "@/lib/types/db";
-import { getDefaultPort } from "@/lib/utils";
+import { getDefaultPort, cn } from "@/lib/utils";
 
-const engines: { value: DatabaseEngine; label: string }[] = [
+const engines: { value: DatabaseEngine; label: string; disabled?: boolean }[] = [
   { value: "mysql", label: "MySQL" },
   { value: "mariadb", label: "MariaDB" },
-  { value: "postgresql", label: "PostgreSQL" },
-  { value: "sqlite", label: "SQLite" },
+  { value: "postgresql", label: "Postgres" },
+  { value: "sqlite", label: "SQLite", disabled: true },
 ];
 
 export function LoginForm() {
   const router = useRouter();
   const { setSessionId } = useActiveSession();
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
   const [form, setForm] = useState({
     engine: "mysql" as DatabaseEngine,
     host: "127.0.0.1",
@@ -33,20 +47,16 @@ export function LoginForm() {
     username: "root",
     password: "",
     databaseName: "",
-    sqlitePath: "",
     saveConnection: false,
     name: "",
     readOnly: false,
   });
-
-  const showNetwork = useMemo(() => form.engine !== "sqlite", [form.engine]);
 
   const onEngineChange = (engine: DatabaseEngine) => {
     setForm((prev) => ({
       ...prev,
       engine,
       port: getDefaultPort(engine),
-      host: engine === "sqlite" ? "" : prev.host || "127.0.0.1",
     }));
   };
 
@@ -58,14 +68,16 @@ export function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
+
       const payload = await res.json();
+
       if (!res.ok || !payload.ok) {
         throw new Error(payload.error ?? "Connection failed");
       }
+
       setSessionId(payload.data.sessionId as string);
-      toast.success("Connected to DB Zoo");
+      toast.success("Connection established");
       router.push("/connections");
-      router.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to connect");
     } finally {
@@ -74,141 +86,222 @@ export function LoginForm() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-8">
-      <section className="relative overflow-hidden rounded-3xl px-6 py-10 pb-0 backdrop-blur-xl sm:px-10">
-        <div className="pointer-events-none absolute inset-0 " />
-        <div className="relative flex flex-col items-center">
-          <Image
-            src="/branding/db-zoo-2.png"
-            alt="DB Zoo logo"
-            width={430}
-            height={118}
-            className="h-auto w-[290px] select-none sm:w-[400px]"
-            draggable={false}
-            priority
-          />
-          <p className="mt-5 max-w-2xl text-center text-md font-semibold text-muted-foreground">
-            Connect to MySQL, MariaDB, PostgreSQL, and SQLite in one clean workspace.
-          </p>
-        </div>
-      </section>
+    <div className="relative mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-10 lg:px-8 lg:py-14">
+      <div className="absolute left-1/2 top-0 -z-10 h-[240px] w-[240px] -translate-x-1/2 rounded-full bg-primary/10 blur-[100px] sm:h-[420px] sm:w-[420px] lg:left-1/4 lg:h-[520px] lg:w-[520px] lg:translate-x-0" />
 
-      <Card className="border-border/70 bg-card/95 shadow-[0_12px_34px_-20px_rgba(0,0,0,0.45)]">
-        <CardHeader className="space-y-1 pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Database className="h-5 w-5 text-primary" />
-            Connect to Database
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">Secure session with optional saved connection profile.</p>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Database type</Label>
-              <Select value={form.engine} onChange={(e) => onEngineChange(e.target.value as DatabaseEngine)} searchable>
-                {engines.map((engine) => (
-                  <option value={engine.value} key={engine.value}>
-                    {engine.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {showNetwork ? (
-              <div className="space-y-2">
-                <Label>Host</Label>
-                <Input value={form.host} onChange={(e) => setForm((prev) => ({ ...prev, host: e.target.value }))} />
-              </div>
-            ) : null}
-            {showNetwork ? (
-              <div className="space-y-2">
-                <Label>Port</Label>
-                <Input
-                  type="number"
-                  value={form.port}
-                  onChange={(e) => setForm((prev) => ({ ...prev, port: Number(e.target.value) }))}
-                />
-              </div>
-            ) : null}
-            {showNetwork ? (
-              <div className="space-y-2">
-                <Label>Username</Label>
-                <Input
-                  value={form.username}
-                  onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
-                />
-              </div>
-            ) : null}
-            {showNetwork ? (
-              <div className="space-y-2">
-                <Label>Password</Label>
-                <Input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-                />
-              </div>
-            ) : null}
-            <div className="space-y-2">
-              <Label>{form.engine === "sqlite" ? "SQLite file path" : "Database (optional)"}</Label>
-              <Input
-                value={form.engine === "sqlite" ? form.sqlitePath : form.databaseName}
-                onChange={(e) =>
-                  setForm((prev) =>
-                    form.engine === "sqlite"
-                      ? { ...prev, sqlitePath: e.target.value }
-                      : { ...prev, databaseName: e.target.value },
-                  )
-                }
+      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-14 xl:gap-20">
+
+        <div className="order-1 flex flex-col justify-center space-y-6 lg:space-y-10">
+          <motion.div initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} className="space-y-4 lg:space-y-6 text-center lg:text-left">
+            <div className="flex justify-center lg:justify-start">
+              <Image
+                src="/branding/db-zoo-2.png"
+                alt="DB Zoo"
+                width={480}
+                height={200}
+                priority
+                draggable={false}
+                className="h-auto w-[180px] select-none dark:invert sm:w-[280px] lg:w-[340px]"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Connection label (if saved)</Label>
-              <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+
+            <div className="space-y-2 lg:space-y-4">
+              <h1 className="text-2xl font-extrabold leading-tight tracking-tight hidden md:block sm:text-5xl lg:text-6xl xl:text-7xl">
+                Modern <br />
+                <span className="bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
+                  Data Tooling.
+                </span>
+              </h1>
+
+              <div className="space-y-3">
+                <p className="mx-auto lg:mx-0 md:max-w-xl max-w-sm text-base leading-relaxed text-muted-foreground sm:text-base lg:text-lg">
+                  Connect to <span className="text-foreground md:font-medium font-semibold">MySQL</span>,{" "}
+                  <span className="text-foreground md:font-medium sm:font-semibold">MariaDB</span>,{" "}
+                  <span className="text-foreground md:font-medium sm:font-semibold">PostgreSQL</span>, and{" "}
+                  <span className="text-foreground md:font-medium sm:font-semibold">SQLite</span> in one clean workspace.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+
+          <div className="hidden md:flex flex flex-wrap items-center justify-center lg:justify-start gap-4 sm:gap-8">
+            <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
+               <Cpu className="h-3 w-3 sm:h-4 w-4" />
+               Next.js
+            </div>
+            <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
+               <Code2 className="h-3 w-3 sm:h-4 w-4" />
+               Type-Safe
+            </div>
+            <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
+               <ShieldCheck className="h-3 w-3 sm:h-4 w-4" />
+               Encrypted
             </div>
           </div>
+        </div>
 
-          <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
-            <div className="flex flex-wrap items-center gap-6">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={form.saveConnection}
-                  onChange={(e) => setForm((prev) => ({ ...prev, saveConnection: e.target.checked }))}
-                />
-                Save connection
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={form.readOnly}
-                  onChange={(e) => setForm((prev) => ({ ...prev, readOnly: e.target.checked }))}
-                />
-                Read-only mode
-              </label>
-            </div>
-          </div>
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="order-2"
+        >
+          <Card className="overflow-hidden border-border/40 bg-white/75 shadow-xl sm:shadow-2xl backdrop-blur-3xl dark:bg-zinc-950/70 rounded-2xl md:rounded-[2.5rem] lg:rounded-3xl">
+            <CardContent className="p-0">
+              <div className="border-b border-border/40 bg-muted/30 p-2 sm:p-4">
+                <div className="grid grid-cols-4 gap-1 rounded-2xl bg-zinc-200/60 p-1 dark:bg-zinc-900/50">
+                  {engines.map((e) => (
+                    <button
+                      key={e.value}
+                      type="button"
+                      disabled={e.disabled}
+                      onClick={() => onEngineChange(e.value)}
+                      className={cn(
+                        "relative rounded-xl px-1 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-tight sm:tracking-[0.14em] transition-colors",
+                        form.engine === e.value
+                          ? "text-primary dark:text-white"
+                          : "text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                      )}
+                    >
+                      <span className="relative z-20">{e.label}</span>
+                      {form.engine === e.value && (
+                        <motion.div
+                          layoutId="active-pill"
+                          transition={{ type: "spring", bounce: 0.2, duration: 0.55 }}
+                          className="absolute inset-0 z-10 rounded-xl bg-white shadow-sm dark:bg-zinc-800"
+                        />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Connection credentials are encrypted at rest.
-            </p>
-            <Button
-              onClick={connect}
-              disabled={isLoading}
-              className="w-full bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200 sm:w-auto"
-            >
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Connect
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              <div className="space-y-5 p-5 sm:p-6 lg:p-8">
+                <div className="space-y-4 sm:space-y-5">
+                  <div className="flex items-center gap-2 px-1">
+                    <Database className="h-3 w-3 sm:h-4 w-4 text-primary" />
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-primary/70">
+                      Target: {form.engine} protocol
+                    </span>
+                  </div>
 
-      <footer className="rounded-2xl px-5 py-4 flex items-center justify-center ">
-        <a href="https://servbase.net" target="_blank" className="flex items-center justify-center gap-3 select-none">
-          <Image draggable={false} src="/branding/servbase.png" alt="Servbase logo" width={80} height={80} className="h-15 w-15" />
-          <div className="leading-tight">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Powered By</p>
-            <p className="text-base font-semibold text-foreground">Servbase</p>
+                  <div className="flex flex-col gap-4 sm:grid sm:grid-cols-3">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Host Address</Label>
+                      <div className="group relative">
+                        <Server className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary" />
+                        <Input
+                          placeholder="localhost"
+                          value={form.host}
+                          onChange={(e) => setForm((prev) => ({ ...prev, host: e.target.value }))}
+                          className="h-11 rounded-xl border-border/60 bg-background/50 pl-10 focus-visible:ring-primary/20"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Port</Label>
+                      <Input
+                        type="number"
+                        value={form.port}
+                        onChange={(e) => setForm((prev) => ({ ...prev, port: Number(e.target.value) }))}
+                        className="h-11 rounded-xl border-border/60 bg-background/50 focus-visible:ring-primary/20"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Credentials</Label>
+                    <div className="space-y-3">
+                      <div className="group relative">
+                        <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary" />
+                        <Input
+                          placeholder="Username"
+                          value={form.username}
+                          onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
+                          className="h-11 rounded-xl border-border/60 bg-background/50 pl-10 focus-visible:ring-primary/20"
+                        />
+                      </div>
+
+                      <div className="group relative">
+                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary" />
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Password"
+                          value={form.password}
+                          onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+                          className="h-11 rounded-xl border-border/60 bg-background/50 px-10 focus-visible:ring-primary/20"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.5rem] border border-border/40 bg-gray-100/80 p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="save-conn" className="text-xs sm:text-sm font-semibold cursor-pointer">Save Connection</Label>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">Store for future sessions.</p>
+                    </div>
+                    <Switch
+                      id="save-conn"
+                      checked={form.saveConnection}
+                      onCheckedChange={(v) => setForm((p) => ({ ...p, saveConnection: v }))}
+                    />
+                  </div>
+
+                  <div className="h-px w-full bg-border/90" />
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="readonly" className="text-xs sm:text-sm font-semibold cursor-pointer">Read-Only Mode</Label>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">Prevent accidental writes.</p>
+                    </div>
+                    <Switch
+                      id="readonly"
+                      checked={form.readOnly}
+                      onCheckedChange={(v) => setForm((p) => ({ ...p, readOnly: v }))}
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  onClick={connect}
+                  disabled={isLoading}
+                  className="group relative h-14 w-full overflow-hidden rounded-2xl bg-zinc-900 text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-black"
+                >
+                  <div className="relative z-10 flex items-center justify-center font-bold tracking-tight">
+                    {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                      <>
+                        Launch Connection
+                        <ChevronRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
+                      </>
+                    )}
+                  </div>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+
+      <footer className="mt-12 lg:mt-16 flex items-center justify-center">
+        <a href="https://servbase.net" target="_blank" className="group flex items-center gap-3 grayscale hover:grayscale-0 transition-all">
+          <Image src="/branding/servbase.png" alt="Servbase" width={70} height={70} className="h-25 w-25 sm:h-14 sm:w-14" />
+          <div className="border-l border-border/50 leading-tight text-left">
+            <p className="text-[9px] sm:text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Powered By</p>
+            <p className="text-sm sm:text-base font-semibold text-foreground">Servbase</p>
           </div>
         </a>
       </footer>
