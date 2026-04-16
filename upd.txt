@@ -1,0 +1,1620 @@
+diff --git a/components/db-manager/query-workbench.tsx b/components/db-manager/query-workbench.tsx
+index bd02e87..5521a5c 100644
+--- a/components/db-manager/query-workbench.tsx
++++ b/components/db-manager/query-workbench.tsx
+@@ -35,41 +35,101 @@ type HistoryItem = {
+ const defaultQuery = "SELECT * FROM customers LIMIT 50;";
+ const MONACO_COLORS = {
+   dark: {
+-    bg:        "#0b111ec7",
+-    fg:        "#f5f5f5",
+-    muted:     "#a3a3a3",
+-    border:    "#262626",
++    bg: "#0b111ec7",
++    fg: "#f5f5f5",
++    muted: "#a3a3a3",
++    border: "#262626",
+     selection: "#264f78",
+-    lineHL:    "#1b263dd5",
++    lineHL: "#1b263dd5",
+   },
+   light: {
+-    bg:        "#ffffff",
+-    fg:        "#171717",
+-    muted:     "#737373",
+-    border:    "#e5e5e5",
++    bg: "#ffffff",
++    fg: "#171717",
++    muted: "#737373",
++    border: "#e5e5e5",
+     selection: "#cce2ff",
+-    lineHL:    "#f8f8f8",
++    lineHL: "#f8f8f8",
+   },
+ } as const;
+ 
+-const THEME_DARK  = "dbzoo-dark";
++const THEME_DARK = "dbzoo-dark";
+ const THEME_LIGHT = "dbzoo-light";
+ 
++const SQL_KEYWORDS = [
++  "SELECT",
++  "FROM",
++  "WHERE",
++  "INSERT",
++  "INTO",
++  "VALUES",
++  "UPDATE",
++  "SET",
++  "DELETE",
++  "JOIN",
++  "LEFT JOIN",
++  "RIGHT JOIN",
++  "INNER JOIN",
++  "OUTER JOIN",
++  "ON",
++  "GROUP BY",
++  "ORDER BY",
++  "HAVING",
++  "LIMIT",
++  "OFFSET",
++  "AS",
++  "AND",
++  "OR",
++  "NOT",
++  "NULL",
++  "IS NULL",
++  "IS NOT NULL",
++  "DISTINCT",
++  "COUNT",
++  "SUM",
++  "AVG",
++  "MIN",
++  "MAX",
++  "CREATE",
++  "ALTER",
++  "DROP",
++  "TABLE",
++  "DATABASE",
++  "SCHEMA",
++  "INDEX",
++  "VIEW",
++  "PRIMARY KEY",
++  "FOREIGN KEY",
++  "REFERENCES",
++  "UNION",
++  "ALL",
++  "CASE",
++  "WHEN",
++  "THEN",
++  "ELSE",
++  "END",
++  "LIKE",
++  "ILIKE",
++  "IN",
++  "EXISTS",
++  "BETWEEN",
++  "ASC",
++  "DESC",
++];
++
+ export function QueryWorkbench() {
+   const { sessionId } = useActiveSession();
+   const { database, schema } = useActiveDbContext();
+   const { resolvedTheme } = useTheme();
+ 
+-  const [query, setQuery]         = useState(defaultQuery);
+-  const [result, setResult]       = useState<QueryResultPayload | null>(null);
++  const [query, setQuery] = useState(defaultQuery);
++  const [result, setResult] = useState<QueryResultPayload | null>(null);
+   const [isRunning, setIsRunning] = useState(false);
+-  const [history, setHistory]     = useState<HistoryItem[]>([]);
++  const [history, setHistory] = useState<HistoryItem[]>([]);
+   const [historySearch, setHistorySearch] = useState("");
+-  const [confirmOpen, setConfirmOpen]     = useState(false);
++  const [confirmOpen, setConfirmOpen] = useState(false);
+ 
+-  // Keep a stable ref to the Monaco namespace so the theme-sync effect can
+-  // call setTheme directly on the live instance without re-mounting the editor.
+   const monacoRef = useRef<any>(null);
++  const completionProviderRef = useRef<{ dispose: () => void } | null>(null);
+ 
+   const risk = useMemo(() => classifyQueryRisk(query), [query]);
+ 
+@@ -81,14 +141,15 @@ export function QueryWorkbench() {
+ 
+   const loadHistory = useCallback(async () => {
+     if (!sessionId) return;
+-    const res     = await fetch(`/api/query?sessionId=${sessionId}`);
++    const res = await fetch(`/api/query?sessionId=${sessionId}`);
+     const payload = await res.json();
+     if (payload.ok) setHistory(payload.data);
+   }, [sessionId]);
+ 
+-  useEffect(() => { void loadHistory(); }, [loadHistory]);
++  useEffect(() => {
++    void loadHistory();
++  }, [loadHistory]);
+ 
+-  // ─── Define both Monaco themes upfront ───────────────────────────────────
+   const defineMonacoThemes = useCallback((monaco: any) => {
+     const define = (name: string, isDark: boolean) => {
+       const c = isDark ? MONACO_COLORS.dark : MONACO_COLORS.light;
+@@ -97,79 +158,94 @@ export function QueryWorkbench() {
+         inherit: true,
+         rules: [],
+         colors: {
+-          "editor.background":                   c.bg,
+-          "editor.foreground":                   c.fg,
+-          "editorLineNumber.foreground":         c.muted,
+-          "editorLineNumber.activeForeground":   c.fg,
+-          "editor.lineHighlightBackground":      c.lineHL,
+-          "editor.selectionBackground":          c.selection,
+-          "editor.inactiveSelectionBackground":  c.selection,
+-          "editorCursor.foreground":             c.fg,
+-          "editorIndentGuide.background1":       c.border,
++          "editor.background": c.bg,
++          "editor.foreground": c.fg,
++          "editorLineNumber.foreground": c.muted,
++          "editorLineNumber.activeForeground": c.fg,
++          "editor.lineHighlightBackground": c.lineHL,
++          "editor.selectionBackground": c.selection,
++          "editor.inactiveSelectionBackground": c.selection,
++          "editorCursor.foreground": c.fg,
++          "editorIndentGuide.background1": c.border,
+           "editorIndentGuide.activeBackground1": c.muted,
+-          "editorBracketMatch.background":       c.selection,
+-          "editorBracketMatch.border":           c.muted,
++          "editorBracketMatch.background": c.selection,
++          "editorBracketMatch.border": c.muted,
+         },
+       });
+     };
+-    define(THEME_DARK,  true);
++
++    define(THEME_DARK, true);
+     define(THEME_LIGHT, false);
+   }, []);
+ 
+-  // ─── Sync Monaco theme whenever the app theme changes ────────────────────
+-  // This fires instantly on toggle because monacoRef.current is already set
+-  // from the onMount callback. No dynamic import, no page reload needed.
+   useEffect(() => {
+     if (!monacoRef.current) return;
+-    monacoRef.current.editor.setTheme(
+-      resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT
+-    );
++    monacoRef.current.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
+   }, [resolvedTheme]);
+ 
+-  // ─── Editor mount ─────────────────────────────────────────────────────────
+-  const handleEditorMount = useCallback(
+-    (editor: any, monaco: any) => {
+-      // Store monaco namespace for the theme-sync effect above
+-      monacoRef.current = monaco;
++  const registerSqlCompletionProvider = useCallback((monaco: any) => {
++    if (completionProviderRef.current) {
++      completionProviderRef.current.dispose();
++    }
+ 
+-      // Define both themes once, then activate the right one immediately
+-      defineMonacoThemes(monaco);
+-      monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
++    completionProviderRef.current = monaco.languages.registerCompletionItemProvider("sql", {
++      triggerCharacters: [" ", ".", "("],
++      provideCompletionItems: (model: any, position: any) => {
++        const word = model.getWordUntilPosition(position);
++        const range = {
++          startLineNumber: position.lineNumber,
++          endLineNumber: position.lineNumber,
++          startColumn: word.startColumn,
++          endColumn: word.endColumn,
++        };
++
++        const suggestions = SQL_KEYWORDS.map((keyword) => ({
++          label: keyword,
++          kind: monaco.languages.CompletionItemKind.Keyword,
++          insertText: keyword,
++          range,
++        }));
++
++        return { suggestions };
++      },
++    });
++  }, []);
+ 
+-      editor.addCommand(
+-        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+-        () => void run()
+-      );
+-    },
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-    [defineMonacoThemes, resolvedTheme]
+-    // `run` omitted intentionally — the command captures the ref-stable version
+-    // to avoid remounting the editor every time `risk` or `query` changes.
+-  );
++  useEffect(() => {
++    return () => {
++      if (completionProviderRef.current) {
++        completionProviderRef.current.dispose();
++      }
++    };
++  }, []);
+ 
+-  // ─── Query execution ──────────────────────────────────────────────────────
+   const runUnsafe = useCallback(async () => {
+     if (!sessionId) {
+       toast.error("No active session");
+       return;
+     }
++
+     setIsRunning(true);
++
+     try {
+-      const res     = await fetch("/api/query", {
+-        method:  "POST",
++      const res = await fetch("/api/query", {
++        method: "POST",
+         headers: { "Content-Type": "application/json" },
+-        body:    JSON.stringify({
++        body: JSON.stringify({
+           sessionId,
+           query,
+           database: database || undefined,
+-          schema:   schema   || undefined,
++          schema: schema || undefined,
+         }),
+       });
++
+       const payload = await res.json();
++
+       if (!payload.ok) {
+         toast.error(payload.error ?? "Query failed");
+         return;
+       }
++
+       setResult(payload.data);
+       toast.success(`Executed in ${payload.data.durationMs}ms`);
+       void loadHistory();
+@@ -183,16 +259,27 @@ export function QueryWorkbench() {
+       setConfirmOpen(true);
+       return;
+     }
++
+     await runUnsafe();
+   }, [risk, runUnsafe]);
+ 
+-  // ─── Result columns ───────────────────────────────────────────────────────
++  const handleEditorMount = useCallback(
++    (editor: any, monaco: any) => {
++      monacoRef.current = monaco;
++      defineMonacoThemes(monaco);
++      registerSqlCompletionProvider(monaco);
++      monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
++
++      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run());
++    },
++    [defineMonacoThemes, registerSqlCompletionProvider, resolvedTheme, run]
++  );
++
+   const resultColumns = useMemo(() => {
+     if (!result) return [];
+     return result.columns ?? Object.keys(result.rows?.[0] ?? {});
+   }, [result]);
+ 
+-  // ─── Render ───────────────────────────────────────────────────────────────
+   return (
+     <>
+       <ConfirmModal
+@@ -210,19 +297,11 @@ export function QueryWorkbench() {
+       />
+ 
+       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+-
+-        {/* ── Left column ───────────────────────────────────────────────── */}
+         <div className="min-w-0 space-y-4">
+-
+-          {/* SQL Editor */}
+           <Card>
+             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+               <CardTitle>SQL Editor</CardTitle>
+-              <Button
+-                onClick={() => void run()}
+-                disabled={isRunning}
+-                className="w-full sm:w-auto"
+-              >
++              <Button onClick={() => void run()} disabled={isRunning} className="w-full sm:w-auto">
+                 <Play className="mr-2 h-4 w-4" />
+                 {isRunning ? "Running…" : "Run (Ctrl/Cmd+Enter)"}
+               </Button>
+@@ -243,25 +322,35 @@ export function QueryWorkbench() {
+                   onChange={(v) => setQuery(v ?? "")}
+                   onMount={handleEditorMount}
+                   height="300px"
+-                  // Do NOT pass the `theme` prop — we manage it entirely via
+-                  // monacoRef so the prop never overwrites our setTheme calls.
+                   theme={undefined}
+                   options={{
+-                    minimap:              { enabled: false },
+-                    fontSize:             13,
+-                    automaticLayout:      true,
++                    minimap: { enabled: false },
++                    fontSize: 13,
++                    automaticLayout: true,
+                     scrollBeyondLastLine: false,
+-                    wordWrap:             "on",
+-                    padding:              { top: 12, bottom: 12 },
+-                    lineNumbers:          "on",
+-                    folding:              false,
+-                    renderLineHighlight:  "line",
+-                    overviewRulerLanes:   0,
++                    wordWrap: "on",
++                    padding: { top: 12, bottom: 12 },
++                    lineNumbers: "on",
++                    folding: false,
++                    renderLineHighlight: "line",
++                    overviewRulerLanes: 0,
+                     hideCursorInOverviewRuler: true,
++                    quickSuggestions: {
++                      other: true,
++                      comments: false,
++                      strings: false,
++                    },
++                    wordBasedSuggestions: "off",
++                    suggest: {
++                      showWords: false,
++                      showSnippets: false,
++                    },
++                    suggestOnTriggerCharacters: true,
++                    tabCompletion: "off",
+                     scrollbar: {
+-                      vertical:                "auto",
+-                      horizontal:              "auto",
+-                      verticalScrollbarSize:   6,
++                      vertical: "auto",
++                      horizontal: "auto",
++                      verticalScrollbarSize: 6,
+                       horizontalScrollbarSize: 6,
+                     },
+                   }}
+@@ -270,7 +359,6 @@ export function QueryWorkbench() {
+             </CardContent>
+           </Card>
+ 
+-          {/* Result */}
+           <Card>
+             <CardHeader className="flex flex-row items-center justify-between">
+               <CardTitle>Result</CardTitle>
+@@ -315,20 +403,15 @@ export function QueryWorkbench() {
+                     </Table>
+                   </div>
+                 ) : (
+-                  <p className="text-sm text-muted-foreground">
+-                    Statement executed successfully.
+-                  </p>
++                  <p className="text-sm text-muted-foreground">Statement executed successfully.</p>
+                 )
+               ) : (
+-                <p className="text-sm text-muted-foreground">
+-                  Run a query to see results.
+-                </p>
++                <p className="text-sm text-muted-foreground">Run a query to see results.</p>
+               )}
+             </CardContent>
+           </Card>
+         </div>
+ 
+-        {/* ── Right column — History ─────────────────────────────────────── */}
+         <Card className="flex min-w-0 flex-col xl:h-[calc(100vh-240px)]">
+           <CardHeader className="space-y-3 pb-3">
+             <CardTitle>Query History</CardTitle>
+@@ -370,10 +453,11 @@ export function QueryWorkbench() {
+                             : "bg-destructive/10 text-destructive"
+                         )}
+                       >
+-                        {entry.success
+-                          ? <CheckCircle2 className="h-3 w-3" />
+-                          : <XCircle className="h-3 w-3" />
+-                        }
++                        {entry.success ? (
++                          <CheckCircle2 className="h-3 w-3" />
++                        ) : (
++                          <XCircle className="h-3 w-3" />
++                        )}
+                         {entry.durationMs}ms
+                       </span>
+                     </div>
+@@ -383,7 +467,6 @@ export function QueryWorkbench() {
+             </div>
+           </CardContent>
+         </Card>
+-
+       </div>
+     </>
+   );
+diff --git a/lib/db/providers/mysql.ts b/lib/db/providers/mysql.ts
+index 10c63e7..84fa783 100644
+--- a/lib/db/providers/mysql.ts
++++ b/lib/db/providers/mysql.ts
+@@ -1,7 +1,10 @@
+ import type { ConnectionInput } from "@/lib/types/db";
+ import type { DatabaseProvider, GetRowsOptions } from "@/lib/db/providers/types";
+ import { MockProvider } from "@/lib/db/providers/mock";
++import { exec } from "child_process";
++import { promisify } from "util";
+ 
++const execAsync = promisify(exec);
+ const mock = new MockProvider();
+ 
+ type MysqlConnection = {
+@@ -23,7 +26,7 @@ function getMysqlModule(): MysqlModule {
+   }
+ }
+ 
+-function buildConfig(input: ConnectionInput) {
++function buildConfig(input: ConnectionInput, extra: Record<string, unknown> = {}) {
+   return {
+     host: input.host,
+     port: input.port ?? 3306,
+@@ -31,6 +34,8 @@ function buildConfig(input: ConnectionInput) {
+     password: input.password,
+     database: input.databaseName?.trim() || undefined,
+     connectTimeout: 5000,
++    multipleStatements: true, // Enable by default for flexibility
++    ...extra,
+   };
+ }
+ 
+@@ -38,6 +43,15 @@ function quoteIdent(value: string) {
+   return `\`${value.replace(/`/g, "``")}\``;
+ }
+ 
++function escapeValue(value: unknown): string {
++  if (value === null || value === undefined) return "NULL";
++  if (typeof value === "number") return String(value);
++  if (typeof value === "boolean") return value ? "1" : "0";
++  if (value instanceof Date) return `'${value.toISOString().slice(0, 19).replace("T", " ")}'`;
++  // Basic string escaping (mysql2 handles parameterized queries, but we need for mysqldump fallback)
++  return `'${String(value).replace(/'/g, "''").replace(/\\/g, "\\\\")}'`;
++}
++
+ export class MySqlProvider implements DatabaseProvider {
+   engine: ConnectionInput["engine"] = "mysql";
+ 
+@@ -75,19 +89,28 @@ export class MySqlProvider implements DatabaseProvider {
+ 
+   async listObjects(input: ConnectionInput, args: { database?: string; schema?: string }) {
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
+     const [rows] = await conn.query("SHOW FULL TABLES");
+     await conn.end();
+     return (rows as Array<Record<string, string>>).map((row) => {
+       const values = Object.values(row);
+-      return { name: String(values[0]), kind: values[1] === "VIEW" ? ("view" as const) : ("table" as const) };
++      return {
++        name: String(values[0]),
++        kind: values[1] === "VIEW" ? ("view" as const) : ("table" as const),
++      };
+     });
+   }
+ 
+   async getTableStructure(input: ConnectionInput, args: { database?: string; schema?: string; table: string }) {
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
+-    const [rows] = await conn.query(`SHOW COLUMNS FROM \`${args.table}\``);
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
++    const [rows] = await conn.query(`SHOW COLUMNS FROM ${quoteIdent(args.table)}`);
+     await conn.end();
+     return (rows as Array<Record<string, string>>).map((row) => ({
+       name: row.Field,
+@@ -101,8 +124,11 @@ export class MySqlProvider implements DatabaseProvider {
+ 
+   async getTableIndexes(input: ConnectionInput, args: { database?: string; schema?: string; table: string }) {
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
+-    const [rows] = await conn.query(`SHOW INDEX FROM \`${args.table}\``);
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
++    const [rows] = await conn.query(`SHOW INDEX FROM ${quoteIdent(args.table)}`);
+     await conn.end();
+     const map = new Map<string, { name: string; columns: string[]; unique: boolean }>();
+     for (const row of rows as Array<Record<string, string | number>>) {
+@@ -145,11 +171,13 @@ export class MySqlProvider implements DatabaseProvider {
+     const mysql = getMysqlModule();
+     const db = args.database ?? input.databaseName;
+     const conn = await mysql.createConnection({ ...buildConfig(input), database: db });
+-    const order = args.options.sortBy ? `ORDER BY \`${args.options.sortBy}\` ${args.options.sortDirection ?? "asc"}` : "";
+-    const [countRows] = await conn.query(`SELECT COUNT(*) as total FROM \`${args.table}\``);
++    const order = args.options.sortBy
++      ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}`
++      : "";
++    const [countRows] = await conn.query(`SELECT COUNT(*) as total FROM ${quoteIdent(args.table)}`);
+     const offset = (args.options.page - 1) * args.options.pageSize;
+     const [rows] = await conn.query(
+-      `SELECT * FROM \`${args.table}\` ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
++      `SELECT * FROM ${quoteIdent(args.table)} ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
+     );
+     await conn.end();
+     return {
+@@ -163,34 +191,115 @@ export class MySqlProvider implements DatabaseProvider {
+   async runQuery(input: ConnectionInput, query: string) {
+     const mysql = getMysqlModule();
+     const started = Date.now();
+-    const conn = await mysql.createConnection(buildConfig(input));
+-    const [rows] = await conn.query(query);
+-    await conn.end();
+-    return {
+-      rows: Array.isArray(rows) ? (rows as Record<string, unknown>[]) : undefined,
+-      columns: Array.isArray(rows) && rows.length > 0 ? Object.keys(rows[0] as object) : [],
+-      affectedRows: !Array.isArray(rows) ? Number((rows as { affectedRows?: number }).affectedRows ?? 0) : undefined,
+-      durationMs: Date.now() - started,
+-    };
++    const conn = await mysql.createConnection(buildConfig(input, { multipleStatements: true }));
++    try {
++      const [results] = await conn.query(query);
++      // For multi-statement queries, results may be an array of result sets
++      const isMultiResult = Array.isArray(results) && results.length > 0 && Array.isArray(results[0]);
++      if (isMultiResult) {
++        // Return the last result set that has rows (if any) or the last result overall
++        const lastResult = results[results.length - 1];
++        const rows = Array.isArray(lastResult) ? lastResult : undefined;
++        const columns = rows && rows.length > 0 ? Object.keys(rows[0] as object) : [];
++        return {
++          rows,
++          columns,
++          affectedRows: !Array.isArray(lastResult)
++            ? Number((lastResult as { affectedRows?: number }).affectedRows ?? 0)
++            : undefined,
++          durationMs: Date.now() - started,
++          multiStatement: true,
++        };
++      }
++      // Single statement
++      return {
++        rows: Array.isArray(results) ? (results as Record<string, unknown>[]) : undefined,
++        columns: Array.isArray(results) && results.length > 0 ? Object.keys(results[0] as object) : [],
++        affectedRows: !Array.isArray(results) ? Number((results as { affectedRows?: number }).affectedRows ?? 0) : undefined,
++        durationMs: Date.now() - started,
++      };
++    } finally {
++      await conn.end();
++    }
+   }
+ 
+-  async createTable(input: ConnectionInput, args: Parameters<DatabaseProvider["createTable"]>[1]) {
+-    // TODO: build robust mysql ddl generator per type and constraints.
+-    return mock.createTable(input, args);
++  async createTable(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["createTable"]>[1],
++  ): Promise<void> {
++    const mysql = getMysqlModule();
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
++
++    const columnsDef: string[] = [];
++    const primaryKeyCols: string[] = [];
++    const uniqueKeys: string[] = [];
++    const indexes: string[] = [];
++    const foreignKeys: string[] = [];
++
++    for (const col of args.columns) {
++      let def = `${quoteIdent(col.name)} ${col.type}`;
++      if (col.length) def += `(${col.length})`;
++      if (!col.nullable) def += " NOT NULL";
++      if (col.isAutoIncrement) def += " AUTO_INCREMENT";
++      if (col.defaultValue !== undefined) {
++        def += ` DEFAULT ${escapeValue(col.defaultValue)}`;
++      }
++      if (col.unique) uniqueKeys.push(`UNIQUE KEY ${quoteIdent(`uq_${col.name}`)} (${quoteIdent(col.name)})`);
++      if (col.isPrimaryKey) primaryKeyCols.push(quoteIdent(col.name));
++      columnsDef.push(def);
++    }
++
++    if (primaryKeyCols.length > 0) {
++      columnsDef.push(`PRIMARY KEY (${primaryKeyCols.join(", ")})`);
++    }
++
++    // Indexes from args
++    for (const idx of args.indexes ?? []) {
++      const cols = idx.columns.map(quoteIdent).join(", ");
++      if (idx.unique) {
++        uniqueKeys.push(`UNIQUE KEY ${quoteIdent(idx.name)} (${cols})`);
++      } else {
++        indexes.push(`KEY ${quoteIdent(idx.name)} (${cols})`);
++      }
++    }
++
++    // Foreign keys
++    for (const fk of args.foreignKeys ?? []) {
++      foreignKeys.push(
++        `CONSTRAINT ${quoteIdent(fk.name)} FOREIGN KEY (${quoteIdent(fk.column)}) ` +
++          `REFERENCES ${quoteIdent(fk.referenceTable)} (${quoteIdent(fk.referenceColumn)}) ` +
++          `ON DELETE ${fk.onDelete ?? "RESTRICT"} ON UPDATE ${fk.onUpdate ?? "RESTRICT"}`,
++      );
++    }
++
++    const allDefs = [...columnsDef, ...uniqueKeys, ...indexes, ...foreignKeys];
++    const sql = `CREATE TABLE ${quoteIdent(args.table)} (\n  ${allDefs.join(",\n  ")}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
++
++    await conn.query(sql);
++    await conn.end();
+   }
+ 
+   async alterTable(input: ConnectionInput, sql: string) {
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection(buildConfig(input));
++    const conn = await mysql.createConnection(buildConfig(input, { multipleStatements: true }));
+     await conn.query(sql);
+     await conn.end();
+   }
+ 
+-  async insertRow(input: ConnectionInput, args: Parameters<DatabaseProvider["insertRow"]>[1]) {
++  async insertRow(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["insertRow"]>[1],
++  ): Promise<void> {
+     const keys = Object.keys(args.row);
+     if (keys.length === 0) throw new Error("Row data is required");
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
+     const columns = keys.map(quoteIdent).join(", ");
+     const placeholders = keys.map(() => "?").join(", ");
+     const values = keys.map((key) => args.row[key] ?? null);
+@@ -198,12 +307,18 @@ export class MySqlProvider implements DatabaseProvider {
+     await conn.end();
+   }
+ 
+-  async updateRow(input: ConnectionInput, args: Parameters<DatabaseProvider["updateRow"]>[1]) {
++  async updateRow(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["updateRow"]>[1],
++  ): Promise<void> {
+     if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+       throw new Error("Primary key is required for updates");
+     }
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
+     const pkKeys = Object.keys(args.primaryKey);
+     const setKeys = Object.keys(args.row).filter((key) => !pkKeys.includes(key));
+     if (setKeys.length === 0) {
+@@ -212,17 +327,26 @@ export class MySqlProvider implements DatabaseProvider {
+     }
+     const setSql = setKeys.map((key) => `${quoteIdent(key)} = ?`).join(", ");
+     const whereSql = pkKeys.map((key) => `${quoteIdent(key)} = ?`).join(" AND ");
+-    const values = [...setKeys.map((key) => args.row[key] ?? null), ...pkKeys.map((key) => args.primaryKey?.[key] ?? null)];
++    const values = [
++      ...setKeys.map((key) => args.row[key] ?? null),
++      ...pkKeys.map((key) => args.primaryKey?.[key] ?? null),
++    ];
+     await conn.query(`UPDATE ${quoteIdent(args.table)} SET ${setSql} WHERE ${whereSql}`, values);
+     await conn.end();
+   }
+ 
+-  async deleteRow(input: ConnectionInput, args: Parameters<DatabaseProvider["deleteRow"]>[1]) {
++  async deleteRow(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["deleteRow"]>[1],
++  ): Promise<void> {
+     if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+       throw new Error("Primary key is required for deletes");
+     }
+     const mysql = getMysqlModule();
+-    const conn = await mysql.createConnection({ ...buildConfig(input), database: args.database ?? input.databaseName });
++    const conn = await mysql.createConnection({
++      ...buildConfig(input),
++      database: args.database ?? input.databaseName,
++    });
+     const pkKeys = Object.keys(args.primaryKey);
+     const whereSql = pkKeys.map((key) => `${quoteIdent(key)} = ?`).join(" AND ");
+     const values = pkKeys.map((key) => args.primaryKey?.[key] ?? null);
+@@ -230,12 +354,120 @@ export class MySqlProvider implements DatabaseProvider {
+     await conn.end();
+   }
+ 
+-  async exportTable(input: ConnectionInput, args: Parameters<DatabaseProvider["exportTable"]>[1]) {
+-    return mock.exportTable(input, args);
++  async exportTable(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["exportTable"]>[1],
++  ): Promise<{ data: string; mimeType: string }> {
++    const { database, table, format } = args;
++    const db = database ?? input.databaseName;
++    if (!db) throw new Error("Database name required for export");
++
++    if (format === "sql") {
++      // Try using mysqldump if available
++      try {
++        const cmd = `mysqldump -h ${input.host} -P ${input.port ?? 3306} -u ${input.username} --password=${input.password} --no-tablespaces ${db} ${table}`;
++        const { stdout } = await execAsync(cmd, { timeout: 30000 });
++        return { data: stdout, mimeType: "application/sql" };
++      } catch {
++        // Fallback to manual INSERT generation
++        const rows = await this.getTableRows(input, {
++          database: db,
++          table,
++          options: { page: 1, pageSize: 1000 },
++        });
++        if (rows.total === 0) {
++          return { data: `-- No data in ${table}`, mimeType: "application/sql" };
++        }
++        const columns = Object.keys(rows.rows[0] || {});
++        const inserts: string[] = [];
++        inserts.push(`INSERT INTO ${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")}) VALUES`);
++        const valueRows = rows.rows.map(
++          (row) => `(${columns.map((col) => escapeValue(row[col])).join(", ")})`,
++        );
++        inserts.push(valueRows.join(",\n") + ";");
++        return { data: inserts.join("\n"), mimeType: "application/sql" };
++      }
++    } else if (format === "csv") {
++      const rows = await this.getTableRows(input, {
++        database: db,
++        table,
++        options: { page: 1, pageSize: 100000 },
++      });
++      const columns = Object.keys(rows.rows[0] || {});
++      const csvRows = [
++        columns.join(","),
++        ...rows.rows.map((row) => columns.map((col) => JSON.stringify(row[col])).join(",")),
++      ];
++      return { data: csvRows.join("\n"), mimeType: "text/csv" };
++    } else {
++      return mock.exportTable(input, args);
++    }
+   }
+ 
+-  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]) {
+-    return mock.importData(input, args);
++  async importData(
++    input: ConnectionInput,
++    args: Parameters<DatabaseProvider["importData"]>[1],
++  ): Promise<{ rowsImported: number }> {
++    const { database, table, data, format } = args;
++    const db = database ?? input.databaseName;
++    if (!db) throw new Error("Database name required for import");
++
++    if (format === "sql") {
++      const mysql = getMysqlModule();
++      const conn = await mysql.createConnection({
++        ...buildConfig(input, { multipleStatements: true }),
++        database: db,
++      });
++      try {
++        await conn.query(data);
++        // Rows affected is hard to determine for arbitrary SQL; return estimate
++        return { rowsImported: -1 };
++      } finally {
++        await conn.end();
++      }
++    } else if (format === "csv") {
++      // Parse CSV and use batch insert
++      const lines = data.split("\n").filter((line) => line.trim());
++      if (lines.length < 2) return { rowsImported: 0 };
++      const headers = lines[0].split(",").map((h) => h.trim());
++      const rows = lines.slice(1).map((line) => {
++        // Naive CSV parsing – improve if needed
++        const values = line.split(",").map((v) => {
++          const trimmed = v.trim();
++          if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
++            return JSON.parse(trimmed);
++          }
++          return trimmed === "" ? null : trimmed;
++        });
++        const row: Record<string, unknown> = {};
++        headers.forEach((h, i) => (row[h] = values[i]));
++        return row;
++      });
++
++      const mysql = getMysqlModule();
++      const conn = await mysql.createConnection({ ...buildConfig(input), database: db });
++      try {
++        let imported = 0;
++        // Batch inserts for performance
++        const batchSize = 100;
++        for (let i = 0; i < rows.length; i += batchSize) {
++          const batch = rows.slice(i, i + batchSize);
++          const columns = Object.keys(batch[0]);
++          const placeholders = batch
++            .map(() => `(${columns.map(() => "?").join(", ")})`)
++            .join(", ");
++          const values = batch.flatMap((row) => columns.map((col) => row[col] ?? null));
++          const sql = `INSERT INTO ${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")}) VALUES ${placeholders}`;
++          const [result] = await conn.query(sql, values);
++          imported += (result as { affectedRows: number }).affectedRows;
++        }
++        return { rowsImported: imported };
++      } finally {
++        await conn.end();
++      }
++    } else {
++      return mock.importData(input, args);
++    }
+   }
+ 
+   async getServerInfo(input: ConnectionInput) {
+@@ -245,7 +477,7 @@ export class MySqlProvider implements DatabaseProvider {
+       version: test.serverVersion ?? "unknown",
+       charset: "utf8mb4",
+       collation: "utf8mb4_general_ci",
+-      capabilities: ["query", "schema", "rows", "metadata"],
++      capabilities: ["query", "schema", "rows", "metadata", "import", "export"],
+     };
+   }
+ }
+diff --git a/lib/db/providers/postgresql.ts b/lib/db/providers/postgresql.ts
+index ad250f7..892405d 100644
+--- a/lib/db/providers/postgresql.ts
++++ b/lib/db/providers/postgresql.ts
+@@ -1,7 +1,10 @@
+ import type { ConnectionInput } from "@/lib/types/db";
+ import type { DatabaseProvider, GetRowsOptions } from "@/lib/db/providers/types";
+ import { MockProvider } from "@/lib/db/providers/mock";
++import { exec } from "child_process";
++import { promisify } from "util";
+ 
++const execAsync = promisify(exec);
+ const mock = new MockProvider();
+ 
+ type PgClientCtor = new (config?: Record<string, unknown>) => {
+@@ -39,7 +42,118 @@ function getClient(input: ConnectionInput, database?: string) {
+ }
+ 
+ function quoteIdent(value: string) {
+-  return `"${value.replace(/"/g, "\"\"")}"`;
++  return `"${value.replace(/"/g, '""')}"`;
++}
++
++function escapeValue(value: unknown): string {
++  if (value === null || value === undefined) return "NULL";
++  if (typeof value === "number") return String(value);
++  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
++  if (value instanceof Date) return `'${value.toISOString()}'`;
++  if (typeof value === "object") return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
++  return `'${String(value).replace(/'/g, "''")}'`;
++}
++
++function splitSqlStatements(sql: string): string[] {
++  const statements: string[] = [];
++  let current = "";
++  let inSingleQuote = false;
++  let inDoubleQuote = false;
++  let inDollarQuote = false;
++  let dollarTag = "";
++  let inLineComment = false;
++  let inBlockComment = false;
++  let i = 0;
++
++  const isDollarQuoteStart = (s: string, pos: number): boolean => {
++    if (s[pos] !== "$") return false;
++    const endIdx = s.indexOf("$", pos + 1);
++    if (endIdx === -1) return false;
++    dollarTag = s.slice(pos, endIdx + 1);
++    return true;
++  };
++
++  while (i < sql.length) {
++    const char = sql[i];
++    const nextChar = sql[i + 1] || "";
++
++    if (!inSingleQuote && !inDoubleQuote && !inDollarQuote && !inBlockComment) {
++      if (char === "-" && nextChar === "-") {
++        inLineComment = true;
++        current += char + nextChar;
++        i += 2;
++        continue;
++      }
++    }
++
++    if (inLineComment) {
++      current += char;
++      if (char === "\n") inLineComment = false;
++      i++;
++      continue;
++    }
++
++    if (!inSingleQuote && !inDoubleQuote && !inDollarQuote && !inLineComment) {
++      if (char === "/" && nextChar === "*") {
++        inBlockComment = true;
++        current += char + nextChar;
++        i += 2;
++        continue;
++      }
++    }
++
++    if (inBlockComment) {
++      current += char;
++      if (char === "*" && nextChar === "/") {
++        current += nextChar;
++        inBlockComment = false;
++        i += 2;
++        continue;
++      }
++      i++;
++      continue;
++    }
++
++    if (!inSingleQuote && !inDoubleQuote && !inLineComment && !inBlockComment) {
++      if (!inDollarQuote) {
++        if (isDollarQuoteStart(sql, i)) {
++          inDollarQuote = true;
++          current += dollarTag;
++          i += dollarTag.length;
++          continue;
++        }
++      } else {
++        if (sql.slice(i, i + dollarTag.length) === dollarTag) {
++          inDollarQuote = false;
++          current += dollarTag;
++          i += dollarTag.length;
++          continue;
++        }
++      }
++    }
++
++    if (!inDoubleQuote && !inDollarQuote && !inLineComment && !inBlockComment) {
++      if (char === "'" && sql[i - 1] !== "\\") inSingleQuote = !inSingleQuote;
++    }
++
++    if (!inSingleQuote && !inDollarQuote && !inLineComment && !inBlockComment) {
++      if (char === '"' && sql[i - 1] !== "\\") inDoubleQuote = !inDoubleQuote;
++    }
++
++    if (char === ";" && !inSingleQuote && !inDoubleQuote && !inDollarQuote && !inLineComment && !inBlockComment) {
++      const trimmed = current.trim();
++      if (trimmed) statements.push(trimmed);
++      current = "";
++      i++;
++      continue;
++    }
++
++    current += char;
++    i++;
++  }
++  const trimmed = current.trim();
++  if (trimmed) statements.push(trimmed);
++  return statements;
+ }
+ 
+ export class PostgreSqlProvider implements DatabaseProvider {
+@@ -53,11 +167,10 @@ export class PostgreSqlProvider implements DatabaseProvider {
+ 
+   async testConnection(input: ConnectionInput) {
+     const started = Date.now();
+-    const client = getClient(input, input.databaseName);
++    const client = getClient(input, input.databaseName ?? "postgres");
+     await client.connect();
+     const result = await client.query("SELECT version()");
+     await client.end();
+-
+     return {
+       ok: true,
+       latencyMs: Date.now() - started,
+@@ -66,43 +179,25 @@ export class PostgreSqlProvider implements DatabaseProvider {
+   }
+ 
+   async listDatabases(input: ConnectionInput) {
+-    const client = getClient(input, input.databaseName ?? "postgres");
++    const client = getClient(input, "postgres");
+     await client.connect();
+-
+-    const res = await client.query(`
+-      SELECT datname
+-      FROM pg_database
+-      WHERE datistemplate = false
+-      ORDER BY datname
+-    `);
+-
++    const res = await client.query(`SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname`);
+     await client.end();
+-
+-    return res.rows.map((row) => ({
+-      name: row.datname as string,
+-    }));
++    return res.rows.map((row) => ({ name: row.datname as string }));
+   }
+ 
+   async listSchemas(input: ConnectionInput, database?: string) {
+     const db = database ?? input.databaseName;
+     const client = getClient(input, db);
+     await client.connect();
+-
+     const res = await client.query(`
+-      SELECT schema_name
+-      FROM information_schema.schemata
+-      WHERE schema_name <> 'information_schema'
+-        AND schema_name NOT LIKE 'pg_toast%'
+-      ORDER BY
+-        CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END,
+-        schema_name
++      SELECT schema_name FROM information_schema.schemata
++      WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
++      AND schema_name NOT LIKE 'pg_temp%' AND schema_name NOT LIKE 'pg_toast_temp%'
++      ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name
+     `);
+-
+     await client.end();
+-
+-    return res.rows.map((row) => ({
+-      name: row.schema_name as string,
+-    }));
++    return res.rows.map((row) => ({ name: row.schema_name as string }));
+   }
+ 
+   async listObjects(input: ConnectionInput, args: { database?: string; schema?: string }) {
+@@ -110,337 +205,317 @@ export class PostgreSqlProvider implements DatabaseProvider {
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+-
+     const [tablesRes, viewsRes, functionsRes] = await Promise.all([
+-      client.query(
+-        `
+-        SELECT table_name AS name
+-        FROM information_schema.tables
+-        WHERE table_schema = $1
+-          AND table_type = 'BASE TABLE'
+-        ORDER BY table_name
+-        `,
+-        [schema],
+-      ),
+-      client.query(
+-        `
+-        SELECT table_name AS name
+-        FROM information_schema.views
+-        WHERE table_schema = $1
+-        ORDER BY table_name
+-        `,
+-        [schema],
+-      ),
+-      client.query(
+-        `
+-        SELECT routine_name AS name
+-        FROM information_schema.routines
+-        WHERE routine_schema = $1
+-        ORDER BY routine_name
+-        `,
+-        [schema],
+-      ),
++      client.query(`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`, [schema]),
++      client.query(`SELECT table_name AS name FROM information_schema.views WHERE table_schema = $1 ORDER BY table_name`, [schema]),
++      client.query(`SELECT routine_name AS name FROM information_schema.routines WHERE routine_schema = $1 ORDER BY routine_name`, [schema]),
+     ]);
+-
+     await client.end();
+-
+     return [
+-      ...tablesRes.rows.map((row) => ({
+-        name: row.name as string,
+-        kind: "table" as const,
+-        schema,
+-      })),
+-      ...viewsRes.rows.map((row) => ({
+-        name: row.name as string,
+-        kind: "view" as const,
+-        schema,
+-      })),
+-      ...functionsRes.rows.map((row) => ({
+-        name: row.name as string,
+-        kind: "function" as const,
+-        schema,
+-      })),
++      ...tablesRes.rows.map((row) => ({ name: row.name as string, kind: "table" as const, schema })),
++      ...viewsRes.rows.map((row) => ({ name: row.name as string, kind: "view" as const, schema })),
++      ...functionsRes.rows.map((row) => ({ name: row.name as string, kind: "function" as const, schema })),
+     ];
+   }
+ 
+-  async getTableStructure(
+-    input: ConnectionInput,
+-    args: { database?: string; schema?: string; table: string },
+-  ) {
++  async getTableStructure(input: ConnectionInput, args: { database?: string; schema?: string; table: string }) {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+ 
+-    const res = await client.query(
+-      `
+-      SELECT
+-        column_name,
+-        data_type,
+-        is_nullable,
+-        column_default
+-      FROM information_schema.columns
+-      WHERE table_schema = $1
+-        AND table_name = $2
+-      ORDER BY ordinal_position
+-      `,
+-      [schema, args.table],
+-    );
++    const [colsRes, pkRes] = await Promise.all([
++      client.query(`
++        SELECT column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length, numeric_precision, numeric_scale
++        FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`, 
++        [schema, args.table]
++      ),
++      client.query(`
++        SELECT kcu.column_name FROM information_schema.table_constraints tc
++        JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
++        WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = $1 AND tc.table_name = $2`, 
++        [schema, args.table]
++      )
++    ]);
+ 
+     await client.end();
+-
+-    return res.rows.map((row) => ({
+-      name: row.column_name as string,
+-      type: row.data_type as string,
+-      nullable: row.is_nullable === "YES",
+-      defaultValue: (row.column_default as string | null) ?? null,
+-      isAutoIncrement:
+-        typeof row.column_default === "string" && row.column_default.includes("nextval"),
+-    }));
++    const pkSet = new Set(pkRes.rows.map(r => r.column_name));
++
++    return colsRes.rows.map((row) => {
++      let type = row.udt_name || row.data_type;
++      if (row.character_maximum_length) type += `(${row.character_maximum_length})`;
++      else if (row.numeric_precision) type += `(${row.numeric_precision}${row.numeric_scale ? `,${row.numeric_scale}` : ""})`;
++
++      return {
++        name: row.column_name as string,
++        type: type as string,
++        nullable: row.is_nullable === "YES",
++        defaultValue: row.column_default as string | null,
++        isPrimaryKey: pkSet.has(row.column_name),
++        isAutoIncrement: typeof row.column_default === "string" && row.column_default.startsWith("nextval"),
++      };
++    });
+   }
+ 
+-  async getTableIndexes(
+-    input: ConnectionInput,
+-    args: { database?: string; schema?: string; table: string },
+-  ) {
++  async getTableIndexes(input: ConnectionInput, args: { database?: string; schema?: string; table: string }) {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+-
+-    const res = await client.query(
+-      `
+-      SELECT
+-        i.relname AS index_name,
+-        ix.indisunique AS is_unique,
+-        a.attname AS column_name
+-      FROM pg_class t
+-      JOIN pg_namespace ns
+-        ON ns.oid = t.relnamespace
+-      JOIN pg_index ix
+-        ON t.oid = ix.indrelid
+-      JOIN pg_class i
+-        ON i.oid = ix.indexrelid
+-      JOIN pg_attribute a
+-        ON a.attrelid = t.oid
+-       AND a.attnum = ANY(ix.indkey)
+-      WHERE ns.nspname = $1
+-        AND t.relname = $2
+-      `,
+-      [schema, args.table],
++    const res = await client.query(`
++      SELECT i.relname AS index_name, ix.indisunique AS is_unique, a.attname AS column_name
++      FROM pg_class t JOIN pg_namespace ns ON ns.oid = t.relnamespace JOIN pg_index ix ON t.oid = ix.indrelid
++      JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
++      WHERE ns.nspname = $1 AND t.relname = $2 AND i.relname NOT LIKE '%_pkey' ORDER BY index_name, a.attnum`, 
++      [schema, args.table]
+     );
+-
+     await client.end();
+-
+     const map = new Map<string, { name: string; columns: string[]; unique: boolean }>();
+-
+     for (const row of res.rows) {
+       const name = row.index_name as string;
+-      if (!map.has(name)) {
+-        map.set(name, {
+-          name,
+-          columns: [],
+-          unique: Boolean(row.is_unique),
+-        });
+-      }
++      if (!map.has(name)) map.set(name, { name, columns: [], unique: Boolean(row.is_unique) });
+       map.get(name)!.columns.push(row.column_name as string);
+     }
+-
+     return [...map.values()];
+   }
+ 
+-  async getTableForeignKeys(
+-    input: ConnectionInput,
+-    args: { database?: string; schema?: string; table: string },
+-  ) {
++  async getTableForeignKeys(input: ConnectionInput, args: { database?: string; schema?: string; table: string }) {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+-
+-    const res = await client.query(
+-      `
+-      SELECT
+-        tc.constraint_name AS name,
+-        kcu.column_name AS column_name,
+-        ccu.table_name AS foreign_table_name,
+-        ccu.column_name AS foreign_column_name
++    const res = await client.query(`
++      SELECT tc.constraint_name AS name, kcu.column_name AS column_name, ccu.table_schema AS foreign_schema,
++      ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+       FROM information_schema.table_constraints AS tc
+-      JOIN information_schema.key_column_usage AS kcu
+-        ON tc.constraint_name = kcu.constraint_name
+-       AND tc.table_schema = kcu.table_schema
+-      JOIN information_schema.constraint_column_usage AS ccu
+-        ON tc.constraint_name = ccu.constraint_name
+-       AND tc.table_schema = ccu.table_schema
+-      WHERE tc.constraint_type = 'FOREIGN KEY'
+-        AND tc.table_schema = $1
+-        AND tc.table_name = $2
+-      `,
+-      [schema, args.table],
++      JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
++      JOIN information_schema.constraint_column_usage AS ccu ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
++      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1 AND tc.table_name = $2`, 
++      [schema, args.table]
+     );
+-
+     await client.end();
+-
+     return res.rows.map((row) => ({
+       name: row.name as string,
+       column: row.column_name as string,
++      referenceSchema: row.foreign_schema as string,
+       referenceTable: row.foreign_table_name as string,
+       referenceColumn: row.foreign_column_name as string,
+     }));
+   }
+ 
+-  async getTableRows(
+-    input: ConnectionInput,
+-    args: { database?: string; schema?: string; table: string; options: GetRowsOptions },
+-  ) {
++  async getTableRows(input: ConnectionInput, args: { database?: string; schema?: string; table: string; options: GetRowsOptions }) {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+-
+     const offset = (args.options.page - 1) * args.options.pageSize;
+-    const order = args.options.sortBy
+-      ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}`
+-      : "";
+-
+-    const rowsRes = await client.query(
+-      `SELECT * FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
+-    );
+-
+-    const countRes = await client.query(
+-      `SELECT COUNT(*)::int AS total FROM ${quoteIdent(schema)}.${quoteIdent(args.table)}`,
+-    );
+-
++    const order = args.options.sortBy ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}` : "";
++    const rowsRes = await client.query(`SELECT * FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} ${order} LIMIT $1 OFFSET $2`, [args.options.pageSize, offset]);
++    const countRes = await client.query(`SELECT COUNT(*)::int AS total FROM ${quoteIdent(schema)}.${quoteIdent(args.table)}`);
+     await client.end();
+-
+-    return {
+-      rows: rowsRes.rows,
+-      total: Number(countRes.rows[0]?.total ?? 0),
+-      page: args.options.page,
+-      pageSize: args.options.pageSize,
+-    };
++    return { rows: rowsRes.rows, total: Number(countRes.rows[0]?.total ?? 0), page: args.options.page, pageSize: args.options.pageSize };
+   }
+ 
+   async runQuery(input: ConnectionInput, query: string) {
+     const started = Date.now();
+     const client = getClient(input, input.databaseName);
+     await client.connect();
+-
+-    const res = await client.query(query);
+-
+-    await client.end();
+-
+-    return {
+-      columns: res.fields.map((field) => field.name),
+-      rows: res.rows as Record<string, unknown>[],
+-      affectedRows: res.rowCount ?? undefined,
+-      durationMs: Date.now() - started,
+-    };
++    try {
++      const statements = splitSqlStatements(query);
++      let lastResult: any = null;
++      if (statements.length > 1) {
++        await client.query("BEGIN");
++        for (const stmt of statements) lastResult = await client.query(stmt);
++        await client.query("COMMIT");
++      } else if (statements.length === 1) {
++        lastResult = await client.query(statements[0]);
++      }
++      return {
++        columns: lastResult?.fields?.map((f: any) => f.name) || [],
++        rows: lastResult?.rows || [],
++        affectedRows: lastResult?.rowCount ?? 0,
++        durationMs: Date.now() - started,
++        multiStatement: statements.length > 1,
++      };
++    } catch (error) {
++      await client.query("ROLLBACK").catch(() => {});
++      throw error;
++    } finally {
++      await client.end();
++    }
+   }
+ 
+-  async createTable(input: ConnectionInput, args: Parameters<DatabaseProvider["createTable"]>[1]) {
+-    return mock.createTable(input, args);
++  async createTable(input: ConnectionInput, args: Parameters<DatabaseProvider["createTable"]>[1]): Promise<void> {
++    const db = args.database ?? input.databaseName;
++    const schema = args.schema ?? "public";
++    const client = getClient(input, db);
++    await client.connect();
++    const columnsDef: string[] = [];
++    const primaryKeyCols: string[] = [];
++    const constraints: string[] = [];
++    for (const col of args.columns) {
++      let def = `${quoteIdent(col.name)} ${col.type}`;
++      if (col.length) def += `(${col.length})`;
++      if (!col.nullable) def += " NOT NULL";
++      if (col.isAutoIncrement) {
++        def = def.replace(/\b(serial|bigserial)\b/i, "INTEGER");
++        def += " GENERATED BY DEFAULT AS IDENTITY";
++      }
++      if (col.defaultValue !== undefined && !col.isAutoIncrement) def += ` DEFAULT ${escapeValue(col.defaultValue)}`;
++      if (col.unique && !col.isPrimaryKey) constraints.push(`CONSTRAINT ${quoteIdent(`uq_${col.name}`)} UNIQUE (${quoteIdent(col.name)})`);
++      if (col.isPrimaryKey) primaryKeyCols.push(quoteIdent(col.name));
++      columnsDef.push(def);
++    }
++    if (primaryKeyCols.length > 0) constraints.push(`PRIMARY KEY (${primaryKeyCols.join(", ")})`);
++    for (const idx of args.indexes ?? []) {
++      const cols = idx.columns.map(quoteIdent).join(", ");
++      if (idx.unique) constraints.push(`CONSTRAINT ${quoteIdent(idx.name)} UNIQUE (${cols})`);
++    }
++    for (const fk of args.foreignKeys ?? []) {
++      const refSchema = fk.referenceSchema ?? schema;
++      constraints.push(`CONSTRAINT ${quoteIdent(fk.name)} FOREIGN KEY (${quoteIdent(fk.column)}) REFERENCES ${quoteIdent(refSchema)}.${quoteIdent(fk.referenceTable)} (${quoteIdent(fk.referenceColumn)}) ON DELETE ${fk.onDelete ?? "NO ACTION"} ON UPDATE ${fk.onUpdate ?? "NO ACTION"}`);
++    }
++    const createSql = `CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(args.table)} (\n  ${[...columnsDef, ...constraints].join(",\n  ")}\n)`;
++    await client.query(createSql);
++    for (const idx of args.indexes ?? []) {
++      if (!idx.unique) await client.query(`CREATE INDEX ${quoteIdent(idx.name)} ON ${quoteIdent(schema)}.${quoteIdent(args.table)} (${idx.columns.map(quoteIdent).join(", ")})`);
++    }
++    await client.end();
+   }
+ 
+-  async alterTable(input: ConnectionInput, sql: string) {
+-    await this.runQuery(input, sql);
+-  }
++  async alterTable(input: ConnectionInput, sql: string) { await this.runQuery(input, sql); }
+ 
+-  async insertRow(input: ConnectionInput, args: Parameters<DatabaseProvider["insertRow"]>[1]) {
++  async insertRow(input: ConnectionInput, args: Parameters<DatabaseProvider["insertRow"]>[1]): Promise<void> {
+     const keys = Object.keys(args.row);
+-    if (keys.length === 0) {
+-      throw new Error("Row data is required");
+-    }
+-
++    if (keys.length === 0) throw new Error("Row data is required");
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const client = getClient(input, db);
+     await client.connect();
+-
+     const columnsSql = keys.map(quoteIdent).join(", ");
+     const valuesSql = keys.map((_, idx) => `$${idx + 1}`).join(", ");
+-    const values = keys.map((key) => args.row[key] ?? null);
+-
+-    await client.query(
+-      `INSERT INTO ${quoteIdent(schema)}.${quoteIdent(args.table)} (${columnsSql}) VALUES (${valuesSql})`,
+-      values,
+-    );
+-
++    await client.query(`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(args.table)} (${columnsSql}) VALUES (${valuesSql})`, keys.map(k => args.row[k] ?? null));
+     await client.end();
+   }
+ 
+-  async updateRow(input: ConnectionInput, args: Parameters<DatabaseProvider["updateRow"]>[1]) {
+-    if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+-      throw new Error("Primary key is required for updates");
+-    }
+-
++  async updateRow(input: ConnectionInput, args: Parameters<DatabaseProvider["updateRow"]>[1]): Promise<void> {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+-    const pkKeys = Object.keys(args.primaryKey);
+-    const setKeys = Object.keys(args.row).filter((key) => !pkKeys.includes(key));
+-
+-    if (setKeys.length === 0) {
+-      return;
+-    }
+-
+     const client = getClient(input, db);
+     await client.connect();
+-
++    let whereClause: string;
++    let whereValues: unknown[] = [];
++    if (args.where) {
++      whereClause = args.where;
++      whereValues = args.whereParams ?? [];
++    } else if (args.primaryKey && Object.keys(args.primaryKey).length > 0) {
++      const pkKeys = Object.keys(args.primaryKey);
++      whereClause = pkKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(" AND ");
++      whereValues = pkKeys.map((key) => args.primaryKey![key] ?? null);
++    } else {
++      throw new Error("Update requires a primary key column.");
++    }
++    const pkKeys = args.primaryKey ? Object.keys(args.primaryKey) : [];
++    const setKeys = Object.keys(args.row).filter(k => !pkKeys.includes(k));
++    if (setKeys.length === 0) { await client.end(); return; }
+     const setSql = setKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(", ");
+-    const whereSql = pkKeys
+-      .map((key, idx) => `${quoteIdent(key)} = $${setKeys.length + idx + 1}`)
+-      .join(" AND ");
+-    const values = [
+-      ...setKeys.map((key) => args.row[key] ?? null),
+-      ...pkKeys.map((key) => args.primaryKey?.[key] ?? null),
+-    ];
+-
+-    await client.query(
+-      `UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${whereSql}`,
+-      values,
+-    );
+-
++    const offset = setKeys.length;
++    const finalWhere = args.where ? whereClause : Object.keys(args.primaryKey!).map((key, idx) => `${quoteIdent(key)} = $${idx + offset + 1}`).join(" AND ");
++    const allValues = [...setKeys.map(k => args.row[k] ?? null), ...whereValues];
++    await client.query(`UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${finalWhere}`, allValues);
+     await client.end();
+   }
+ 
+-  async deleteRow(input: ConnectionInput, args: Parameters<DatabaseProvider["deleteRow"]>[1]) {
+-    if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+-      throw new Error("Primary key is required for deletes");
+-    }
+-
++  async deleteRow(input: ConnectionInput, args: Parameters<DatabaseProvider["deleteRow"]>[1]): Promise<void> {
+     const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+-    const pkKeys = Object.keys(args.primaryKey);
+     const client = getClient(input, db);
+     await client.connect();
+-
+-    const whereSql = pkKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(" AND ");
+-    const values = pkKeys.map((key) => args.primaryKey?.[key] ?? null);
+-
+-    await client.query(
+-      `DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereSql}`,
+-      values,
+-    );
+-
++    let whereClause: string;
++    let whereValues: unknown[] = [];
++    if (args.where) {
++      whereClause = args.where;
++      whereValues = args.whereParams ?? [];
++    } else if (args.primaryKey && Object.keys(args.primaryKey).length > 0) {
++      const pkKeys = Object.keys(args.primaryKey);
++      whereClause = pkKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(" AND ");
++      whereValues = pkKeys.map((key) => args.primaryKey![key] ?? null);
++    } else {
++      throw new Error("Delete requires a primary key column.");
++    }
++    await client.query(`DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereClause}`, whereValues);
+     await client.end();
+   }
+ 
+-  async exportTable(input: ConnectionInput, args: Parameters<DatabaseProvider["exportTable"]>[1]) {
++  async exportTable(input: ConnectionInput, args: Parameters<DatabaseProvider["exportTable"]>[1]): Promise<{ data: string; mimeType: string }> {
++    const { database, schema, table, format } = args;
++    const db = database ?? input.databaseName;
++    const sch = schema ?? "public";
++    if (!db) throw new Error("Database name required for export");
++    if (format === "sql") {
++      try {
++        const cmd = `PGPASSWORD="${input.password}" pg_dump -h ${input.host} -p ${input.port ?? 5432} -U ${input.username} -d ${db} -t ${quoteIdent(sch)}.${quoteIdent(table)} --no-owner --no-privileges`;
++        const { stdout } = await execAsync(cmd, { timeout: 30000 });
++        return { data: stdout, mimeType: "application/sql" };
++      } catch {
++        const rows = await this.getTableRows(input, { database: db, schema: sch, table, options: { page: 1, pageSize: 1000 } });
++        if (rows.total === 0) return { data: `-- No data in ${sch}.${table}`, mimeType: "application/sql" };
++        const columns = Object.keys(rows.rows[0] || {});
++        const inserts = [`INSERT INTO ${quoteIdent(sch)}.${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")}) VALUES`, rows.rows.map(row => `(${columns.map(col => escapeValue(row[col])).join(", ")})`).join(",\n") + ";"];
++        return { data: inserts.join("\n"), mimeType: "application/sql" };
++      }
++    } else if (format === "csv") {
++      const rows = await this.getTableRows(input, { database: db, schema: sch, table, options: { page: 1, pageSize: 100000 } });
++      const columns = Object.keys(rows.rows[0] || {});
++      const csvRows = [columns.join(","), ...rows.rows.map(row => columns.map(col => JSON.stringify(row[col])).join(","))];
++      return { data: csvRows.join("\n"), mimeType: "text/csv" };
++    }
+     return mock.exportTable(input, args);
+   }
+ 
+-  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]) {
++  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]): Promise<{ rowsImported: number }> {
++    const { database, schema, table, data, format } = args;
++    const db = database ?? input.databaseName;
++    const sch = schema ?? "public";
++    if (!db) throw new Error("Database name required for import");
++    const client = getClient(input, db);
++    await client.connect();
++    try {
++      if (format === "sql") {
++        await client.query("BEGIN");
++        for (const stmt of splitSqlStatements(data)) await client.query(stmt);
++        await client.query("COMMIT");
++        return { rowsImported: -1 };
++      } else if (format === "csv") {
++        const lines = data.split("\n").filter(l => l.trim());
++        if (lines.length < 2) return { rowsImported: 0 };
++        const headers = lines[0].split(",").map(h => h.trim());
++        const rows = lines.slice(1).map(line => {
++          const values = line.split(",").map(v => v.trim().startsWith('"') ? JSON.parse(v.trim()) : (v.trim() === "" ? null : v.trim()));
++          const row: Record<string, any> = {};
++          headers.forEach((h, i) => row[h] = values[i]);
++          return row;
++        });
++        let imported = 0;
++        for (let i = 0; i < rows.length; i += 100) {
++          const batch = rows.slice(i, i + 100);
++          const columns = Object.keys(batch[0]);
++          const placeholders = batch.map((_, rIdx) => `(${columns.map((_, cIdx) => `$${rIdx * columns.length + cIdx + 1}`).join(", ")})`).join(", ");
++          const result = await client.query(`INSERT INTO ${quoteIdent(sch)}.${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")}) VALUES ${placeholders}`, batch.flatMap(r => columns.map(c => r[c] ?? null)));
++          imported += result.rowCount ?? 0;
++        }
++        return { rowsImported: imported };
++      }
++    } finally { await client.end(); }
+     return mock.importData(input, args);
+   }
+ 
+   async getServerInfo(input: ConnectionInput) {
+     const test = await this.testConnection(input);
+-    return {
+-      engine: "postgresql" as const,
+-      version: test.serverVersion ?? "unknown",
+-      charset: "UTF8",
+-      collation: "en_US.UTF-8",
+-      capabilities: ["query", "schemas", "json", "roles"],
+-    };
++    const client = getClient(input, input.databaseName ?? "postgres");
++    await client.connect();
++    const enc = await client.query("SHOW server_encoding"), coll = await client.query("SHOW lc_collate");
++    await client.end();
++    return { engine: "postgresql" as const, version: test.serverVersion ?? "unknown", charset: enc.rows[0]?.server_encoding ?? "UTF8", collation: coll.rows[0]?.lc_collate ?? "en_US.UTF-8", capabilities: ["query", "schemas", "json", "roles", "import", "export", "transactions"] };
+   }
+-}
++}
+\ No newline at end of file

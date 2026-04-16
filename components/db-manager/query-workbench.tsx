@@ -35,41 +35,101 @@ type HistoryItem = {
 const defaultQuery = "SELECT * FROM customers LIMIT 50;";
 const MONACO_COLORS = {
   dark: {
-    bg:        "#0b111ec7",
-    fg:        "#f5f5f5",
-    muted:     "#a3a3a3",
-    border:    "#262626",
+    bg: "#0b111ec7",
+    fg: "#f5f5f5",
+    muted: "#a3a3a3",
+    border: "#262626",
     selection: "#264f78",
-    lineHL:    "#1b263dd5",
+    lineHL: "#1b263dd5",
   },
   light: {
-    bg:        "#ffffff",
-    fg:        "#171717",
-    muted:     "#737373",
-    border:    "#e5e5e5",
+    bg: "#ffffff",
+    fg: "#171717",
+    muted: "#737373",
+    border: "#e5e5e5",
     selection: "#cce2ff",
-    lineHL:    "#f8f8f8",
+    lineHL: "#f8f8f8",
   },
 } as const;
 
-const THEME_DARK  = "dbzoo-dark";
+const THEME_DARK = "dbzoo-dark";
 const THEME_LIGHT = "dbzoo-light";
+
+const SQL_KEYWORDS = [
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "INSERT",
+  "INTO",
+  "VALUES",
+  "UPDATE",
+  "SET",
+  "DELETE",
+  "JOIN",
+  "LEFT JOIN",
+  "RIGHT JOIN",
+  "INNER JOIN",
+  "OUTER JOIN",
+  "ON",
+  "GROUP BY",
+  "ORDER BY",
+  "HAVING",
+  "LIMIT",
+  "OFFSET",
+  "AS",
+  "AND",
+  "OR",
+  "NOT",
+  "NULL",
+  "IS NULL",
+  "IS NOT NULL",
+  "DISTINCT",
+  "COUNT",
+  "SUM",
+  "AVG",
+  "MIN",
+  "MAX",
+  "CREATE",
+  "ALTER",
+  "DROP",
+  "TABLE",
+  "DATABASE",
+  "SCHEMA",
+  "INDEX",
+  "VIEW",
+  "PRIMARY KEY",
+  "FOREIGN KEY",
+  "REFERENCES",
+  "UNION",
+  "ALL",
+  "CASE",
+  "WHEN",
+  "THEN",
+  "ELSE",
+  "END",
+  "LIKE",
+  "ILIKE",
+  "IN",
+  "EXISTS",
+  "BETWEEN",
+  "ASC",
+  "DESC",
+];
 
 export function QueryWorkbench() {
   const { sessionId } = useActiveSession();
   const { database, schema } = useActiveDbContext();
   const { resolvedTheme } = useTheme();
 
-  const [query, setQuery]         = useState(defaultQuery);
-  const [result, setResult]       = useState<QueryResultPayload | null>(null);
+  const [query, setQuery] = useState(defaultQuery);
+  const [result, setResult] = useState<QueryResultPayload | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [history, setHistory]     = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historySearch, setHistorySearch] = useState("");
-  const [confirmOpen, setConfirmOpen]     = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // Keep a stable ref to the Monaco namespace so the theme-sync effect can
-  // call setTheme directly on the live instance without re-mounting the editor.
   const monacoRef = useRef<any>(null);
+  const completionProviderRef = useRef<{ dispose: () => void } | null>(null);
 
   const risk = useMemo(() => classifyQueryRisk(query), [query]);
 
@@ -81,14 +141,15 @@ export function QueryWorkbench() {
 
   const loadHistory = useCallback(async () => {
     if (!sessionId) return;
-    const res     = await fetch(`/api/query?sessionId=${sessionId}`);
+    const res = await fetch(`/api/query?sessionId=${sessionId}`);
     const payload = await res.json();
     if (payload.ok) setHistory(payload.data);
   }, [sessionId]);
 
-  useEffect(() => { void loadHistory(); }, [loadHistory]);
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
-  // ─── Define both Monaco themes upfront ───────────────────────────────────
   const defineMonacoThemes = useCallback((monaco: any) => {
     const define = (name: string, isDark: boolean) => {
       const c = isDark ? MONACO_COLORS.dark : MONACO_COLORS.light;
@@ -97,79 +158,94 @@ export function QueryWorkbench() {
         inherit: true,
         rules: [],
         colors: {
-          "editor.background":                   c.bg,
-          "editor.foreground":                   c.fg,
-          "editorLineNumber.foreground":         c.muted,
-          "editorLineNumber.activeForeground":   c.fg,
-          "editor.lineHighlightBackground":      c.lineHL,
-          "editor.selectionBackground":          c.selection,
-          "editor.inactiveSelectionBackground":  c.selection,
-          "editorCursor.foreground":             c.fg,
-          "editorIndentGuide.background1":       c.border,
+          "editor.background": c.bg,
+          "editor.foreground": c.fg,
+          "editorLineNumber.foreground": c.muted,
+          "editorLineNumber.activeForeground": c.fg,
+          "editor.lineHighlightBackground": c.lineHL,
+          "editor.selectionBackground": c.selection,
+          "editor.inactiveSelectionBackground": c.selection,
+          "editorCursor.foreground": c.fg,
+          "editorIndentGuide.background1": c.border,
           "editorIndentGuide.activeBackground1": c.muted,
-          "editorBracketMatch.background":       c.selection,
-          "editorBracketMatch.border":           c.muted,
+          "editorBracketMatch.background": c.selection,
+          "editorBracketMatch.border": c.muted,
         },
       });
     };
-    define(THEME_DARK,  true);
+
+    define(THEME_DARK, true);
     define(THEME_LIGHT, false);
   }, []);
 
-  // ─── Sync Monaco theme whenever the app theme changes ────────────────────
-  // This fires instantly on toggle because monacoRef.current is already set
-  // from the onMount callback. No dynamic import, no page reload needed.
   useEffect(() => {
     if (!monacoRef.current) return;
-    monacoRef.current.editor.setTheme(
-      resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT
-    );
+    monacoRef.current.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
   }, [resolvedTheme]);
 
-  // ─── Editor mount ─────────────────────────────────────────────────────────
-  const handleEditorMount = useCallback(
-    (editor: any, monaco: any) => {
-      // Store monaco namespace for the theme-sync effect above
-      monacoRef.current = monaco;
+  const registerSqlCompletionProvider = useCallback((monaco: any) => {
+    if (completionProviderRef.current) {
+      completionProviderRef.current.dispose();
+    }
 
-      // Define both themes once, then activate the right one immediately
-      defineMonacoThemes(monaco);
-      monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
+    completionProviderRef.current = monaco.languages.registerCompletionItemProvider("sql", {
+      triggerCharacters: [" ", ".", "("],
+      provideCompletionItems: (model: any, position: any) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn,
+        };
 
-      editor.addCommand(
-        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-        () => void run()
-      );
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [defineMonacoThemes, resolvedTheme]
-    // `run` omitted intentionally — the command captures the ref-stable version
-    // to avoid remounting the editor every time `risk` or `query` changes.
-  );
+        const suggestions = SQL_KEYWORDS.map((keyword) => ({
+          label: keyword,
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: keyword,
+          range,
+        }));
 
-  // ─── Query execution ──────────────────────────────────────────────────────
+        return { suggestions };
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (completionProviderRef.current) {
+        completionProviderRef.current.dispose();
+      }
+    };
+  }, []);
+
   const runUnsafe = useCallback(async () => {
     if (!sessionId) {
       toast.error("No active session");
       return;
     }
+
     setIsRunning(true);
+
     try {
-      const res     = await fetch("/api/query", {
-        method:  "POST",
+      const res = await fetch("/api/query", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
+        body: JSON.stringify({
           sessionId,
           query,
           database: database || undefined,
-          schema:   schema   || undefined,
+          schema: schema || undefined,
         }),
       });
+
       const payload = await res.json();
+
       if (!payload.ok) {
         toast.error(payload.error ?? "Query failed");
         return;
       }
+
       setResult(payload.data);
       toast.success(`Executed in ${payload.data.durationMs}ms`);
       void loadHistory();
@@ -183,16 +259,27 @@ export function QueryWorkbench() {
       setConfirmOpen(true);
       return;
     }
+
     await runUnsafe();
   }, [risk, runUnsafe]);
 
-  // ─── Result columns ───────────────────────────────────────────────────────
+  const handleEditorMount = useCallback(
+    (editor: any, monaco: any) => {
+      monacoRef.current = monaco;
+      defineMonacoThemes(monaco);
+      registerSqlCompletionProvider(monaco);
+      monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
+
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run());
+    },
+    [defineMonacoThemes, registerSqlCompletionProvider, resolvedTheme, run]
+  );
+
   const resultColumns = useMemo(() => {
     if (!result) return [];
     return result.columns ?? Object.keys(result.rows?.[0] ?? {});
   }, [result]);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
       <ConfirmModal
@@ -210,19 +297,11 @@ export function QueryWorkbench() {
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-
-        {/* ── Left column ───────────────────────────────────────────────── */}
         <div className="min-w-0 space-y-4">
-
-          {/* SQL Editor */}
           <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle>SQL Editor</CardTitle>
-              <Button
-                onClick={() => void run()}
-                disabled={isRunning}
-                className="w-full sm:w-auto"
-              >
+              <Button onClick={() => void run()} disabled={isRunning} className="w-full sm:w-auto">
                 <Play className="mr-2 h-4 w-4" />
                 {isRunning ? "Running…" : "Run (Ctrl/Cmd+Enter)"}
               </Button>
@@ -243,25 +322,35 @@ export function QueryWorkbench() {
                   onChange={(v) => setQuery(v ?? "")}
                   onMount={handleEditorMount}
                   height="300px"
-                  // Do NOT pass the `theme` prop — we manage it entirely via
-                  // monacoRef so the prop never overwrites our setTheme calls.
                   theme={undefined}
                   options={{
-                    minimap:              { enabled: false },
-                    fontSize:             13,
-                    automaticLayout:      true,
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    automaticLayout: true,
                     scrollBeyondLastLine: false,
-                    wordWrap:             "on",
-                    padding:              { top: 12, bottom: 12 },
-                    lineNumbers:          "on",
-                    folding:              false,
-                    renderLineHighlight:  "line",
-                    overviewRulerLanes:   0,
+                    wordWrap: "on",
+                    padding: { top: 12, bottom: 12 },
+                    lineNumbers: "on",
+                    folding: false,
+                    renderLineHighlight: "line",
+                    overviewRulerLanes: 0,
                     hideCursorInOverviewRuler: true,
+                    quickSuggestions: {
+                      other: true,
+                      comments: false,
+                      strings: false,
+                    },
+                    wordBasedSuggestions: "off",
+                    suggest: {
+                      showWords: false,
+                      showSnippets: false,
+                    },
+                    suggestOnTriggerCharacters: true,
+                    tabCompletion: "off",
                     scrollbar: {
-                      vertical:                "auto",
-                      horizontal:              "auto",
-                      verticalScrollbarSize:   6,
+                      vertical: "auto",
+                      horizontal: "auto",
+                      verticalScrollbarSize: 6,
                       horizontalScrollbarSize: 6,
                     },
                   }}
@@ -270,7 +359,6 @@ export function QueryWorkbench() {
             </CardContent>
           </Card>
 
-          {/* Result */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Result</CardTitle>
@@ -315,20 +403,15 @@ export function QueryWorkbench() {
                     </Table>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Statement executed successfully.
-                  </p>
+                  <p className="text-sm text-muted-foreground">Statement executed successfully.</p>
                 )
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  Run a query to see results.
-                </p>
+                <p className="text-sm text-muted-foreground">Run a query to see results.</p>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* ── Right column — History ─────────────────────────────────────── */}
         <Card className="flex min-w-0 flex-col xl:h-[calc(100vh-240px)]">
           <CardHeader className="space-y-3 pb-3">
             <CardTitle>Query History</CardTitle>
@@ -370,10 +453,11 @@ export function QueryWorkbench() {
                             : "bg-destructive/10 text-destructive"
                         )}
                       >
-                        {entry.success
-                          ? <CheckCircle2 className="h-3 w-3" />
-                          : <XCircle className="h-3 w-3" />
-                        }
+                        {entry.success ? (
+                          <CheckCircle2 className="h-3 w-3" />
+                        ) : (
+                          <XCircle className="h-3 w-3" />
+                        )}
                         {entry.durationMs}ms
                       </span>
                     </div>
@@ -383,7 +467,6 @@ export function QueryWorkbench() {
             </div>
           </CardContent>
         </Card>
-
       </div>
     </>
   );
