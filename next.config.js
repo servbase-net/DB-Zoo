@@ -4,6 +4,7 @@ const nextConfig = {
         'http://localhost',
         'http://192.168.140.130',
         'https://db-zoo.servbase.net',
+        'db-zoo.servbase.net',
     ]
 };
 
