@@ -13,12 +13,12 @@ export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
       className={cn(
         "erd-node-container min-w-[260px] overflow-hidden rounded-lg border bg-card shadow-2xl",
         selected || data.highlighted 
-          ? "border-emerald-500 ring-1 ring-emerald-500/50" 
+          ? "border-foreground ring-1 ring-foreground/20 dark:border-emerald-500 dark:ring-emerald-500/50" 
           : "border-border"
       )}
     >
       <div className="flex items-center gap-2 border-b border-border bg-muted/50 px-3 py-2.5">
-        <Table2 className="h-4 w-4 text-emerald-500" />
+        <Table2 className="h-4 w-4 text-foreground dark:text-emerald-500" />
         <span className="text-sm font-bold text-foreground uppercase tracking-wider">
           {data.table.name}
         </span>
@@ -28,13 +28,13 @@ export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
         {data.table.columns.map((column) => (
           <div 
             key={column.id} 
-            className="relative flex items-center justify-between px-3 py-1.5 hover:bg-emerald-500/10"
+            className="relative flex items-center justify-between px-3 py-1.5 hover:bg-foreground/5 dark:hover:bg-emerald-500/10"
           >
             <Handle type="target" id={column.id} position={Position.Left} />
 
             <div className="flex items-center gap-2">
               {column.isPrimaryKey ? (
-                <KeyRound className="h-3 w-3 text-emerald-500" />
+                <KeyRound className="h-3 w-3 text-foreground dark:text-emerald-500" />
               ) : column.isForeignKey ? (
                 <Link2 className="h-3 w-3 text-muted-foreground" />
               ) : (
@@ -42,7 +42,7 @@ export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
               )}
               <span className={cn(
                 "text-[13px]",
-                column.isPrimaryKey ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-foreground"
+                column.isPrimaryKey ? "text-foreground dark:text-emerald-400 font-semibold" : "text-foreground"
               )}>
                 {column.name}
               </span>

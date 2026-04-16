@@ -177,42 +177,44 @@ function RelationalDiagramCanvas() {
           </CardHeader>
           <CardContent className="h-[72vh] p-0">
 
-<ReactFlow
-  nodes={nodes}
-  edges={edges}
-  onNodesChange={onNodesChange}
-  onEdgesChange={onEdgesChange}
-  onNodeClick={(_, node) => onSelectTable(node.id)}
-  onNodeMouseEnter={(_, node) => {
-    setEdges((eds) => 
-      eds.map((e) => {
-        if (e.source === node.id || e.target === node.id) {
-          return { ...e, className: 'animated-edge' };
-        }
-        return e;
-      })
-    );
-  }}
-  onNodeMouseLeave={() => {
-    setEdges((eds) => 
-      eds.map((e) => ({ ...e, className: '' }))
-    );
-  }}
-  onInit={setFlowInstance}
-  nodeTypes={nodeTypes}
-  fitView
-  fitViewOptions={{ padding: 0.2 }}
-  className="bg-background"
->
-  <Background 
-    color="hsl(var(--muted-foreground))" 
-    variant={BackgroundVariant.Dots} 
-    gap={24} 
-    size={1} 
-    opacity={0.2}
-  />
-  <Controls />
-</ReactFlow>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(_, node) => onSelectTable(node.id)}
+              onNodeMouseEnter={(_, node) => {
+                setEdges((eds) => 
+                  eds.map((e) => (e.source === node.id || e.target === node.id) 
+                    ? { ...e, className: 'animated-edge' } 
+                    : e
+                  )
+                );
+              }}
+              onNodeMouseLeave={() => {
+                setEdges((eds) => eds.map((e) => ({ ...e, className: '' })));
+              }}
+              onInit={setFlowInstance}
+              nodeTypes={nodeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
+              className="bg-background"
+            >
+              <Background 
+                color="hsl(var(--foreground))" 
+                variant={BackgroundVariant.Dots} 
+                gap={24} 
+                size={1} 
+                opacity={0.1}
+              />
+              <Controls />
+              <MiniMap 
+                nodeColor="#10b981" 
+                maskColor="rgba(0, 0, 0, 0.7)" 
+                style={{ backgroundColor: '#020617' }} 
+              />
+
+            </ReactFlow>
 
           </CardContent>
         </Card>
