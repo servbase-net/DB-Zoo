@@ -6,7 +6,6 @@
   --background: 210 40% 98%;
   --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  /* --border: 214 32% 91%; */
   --border: 210 16% 82%;
   --muted: 210 40% 96%;
   --muted-foreground: 215 16% 46%;
@@ -30,4 +29,75 @@
 
 body {
   @apply bg-background text-foreground antialiased;
+}
+
+.react-flow__edge-path {
+  stroke: hsl(var(--foreground)) !important;
+  stroke-width: 2;
+  stroke-opacity: 0.3;
+  transition: all 0.3s ease;
+}
+
+/* Light Mode Hover: Becomes Solid Black/Dark */
+.react-flow__edge.animated-edge .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: hsl(var(--foreground)) !important;
+  stroke-width: 3;
+  stroke-opacity: 1 !important;
+  stroke-dasharray: 8;
+  animation: flow-dash 0.8s linear infinite;
+}
+
+/* Dark Mode Transitions */
+.dark .react-flow__edge-path {
+  stroke: #10b981 !important;
+  stroke-opacity: 0.4;
+}
+
+/* Dark Mode Hover: Becomes Neon Green */
+.dark .react-flow__edge.animated-edge .react-flow__edge-path,
+.dark .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #10b981 !important;
+  stroke-opacity: 1 !important;
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
+}
+
+.react-flow__edge marker path {
+  fill: hsl(var(--foreground)) !important;
+  transition: fill 0.3s ease;
+}
+
+.dark .react-flow__edge marker path {
+  fill: #10b981 !important;
+  fill-opacity: 0.4;
+}
+
+.dark .react-flow__edge.animated-edge marker path {
+  fill-opacity: 1 !important;
+}
+
+@keyframes flow-dash {
+  from {
+    stroke-dashoffset: 16;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.react-flow__handle {
+  width: 8px !important;
+  height: 8px !important;
+  background: hsl(var(--foreground)) !important;
+  border: 2px solid hsl(var(--card)) !important;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.dark .react-flow__handle {
+  background: #10b981 !important;
+}
+
+.erd-node-container:hover .react-flow__handle {
+  opacity: 1;
 }

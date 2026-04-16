@@ -9,19 +9,24 @@ export type ErdTableNodeData = {
 export type ErdFlowNode = Node<ErdTableNodeData, "erdTable">;
 
 export function buildInitialTableLayout(tables: ErdTable[]) {
-  const sortedTables = [...tables].sort((a, b) => b.columns.length - a.columns.length || a.name.localeCompare(b.name));
-  const columns = Math.max(1, Math.ceil(Math.sqrt(sortedTables.length)));
-  const xGap = 520;
-  const yGap = 100;
   const positions = new Map<string, { x: number; y: number }>();
-  const columnHeights = new Array(columns).fill(0);
+  
+  const xGap = 420;      
+  const verticalPadding = 60; 
+  const cols = 3;
+  
+  const columnHeights = new Array(cols).fill(0);
 
-  sortedTables.forEach((table) => {
-    const estimatedHeight = 68 + table.columns.length * 34;
-    const col = columnHeights.indexOf(Math.min(...columnHeights));
-    const y = columnHeights[col];
-    positions.set(table.id, { x: col * xGap, y });
-    columnHeights[col] = y + estimatedHeight + yGap;
+  tables.forEach((table, i) => {
+    const colIndex = i % cols;
+    const tableHeight = 60 + (table.columns.length * 32);
+
+    const x = colIndex * xGap;
+    const y = columnHeights[colIndex];
+
+    positions.set(table.id, { x, y });
+
+    columnHeights[colIndex] += tableHeight + verticalPadding;
   });
 
   return positions;
@@ -44,34 +49,23 @@ export function toFlowGraph(
     draggable: true,
   }));
 
-  const edges: Edge[] = model.relationships.map((relationship, index) => {
-    const sourceNode = nodes.find((node) => node.id === relationship.sourceTableId);
-    const targetNode = nodes.find((node) => node.id === relationship.targetTableId);
-    const horizontalDistance = Math.abs((sourceNode?.position.x ?? 0) - (targetNode?.position.x ?? 0));
-    return {
-      id: relationship.id,
-      source: relationship.sourceTableId,
-      target: relationship.targetTableId,
-      sourceHandle: relationship.sourceColumnId,
-      targetHandle: relationship.targetColumnId,
-      type: "step",
-      pathOptions: {
-        offset: Math.min(120, Math.max(36, Math.floor(horizontalDistance / 6))),
-        borderRadius: 10,
-      },
-      animated: false,
-      label: relationship.name,
-      style: {
-        strokeWidth: 1.8,
-      },
-      zIndex: 6 + (index % 2),
-      data: {
-        onDelete: relationship.onDelete,
-        onUpdate: relationship.onUpdate,
-      },
-      markerEnd: { type: MarkerType.ArrowClosed },
-    };
-  });
+  const edges: Edge[] = model.relationships.map((rel) => ({
+    id: rel.id,
+    source: rel.sourceTableId,
+    target: rel.targetTableId,
+    sourceHandle: rel.sourceColumnId,
+    targetHandle: rel.targetColumnId,
+    type: "smoothstep",
+    interactionWidth: 20,
+    style: {
+      strokeWidth: 2,
+    },
+    markerEnd: {
+      type: MarkerType ? MarkerType.ArrowClosed : ("arrowclosed" as any),
+      width: 20,
+      height: 20,
+    },
+  }));
 
   return { nodes, edges };
 }

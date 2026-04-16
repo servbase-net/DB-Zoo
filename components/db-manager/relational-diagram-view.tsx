@@ -7,6 +7,8 @@ import {
   type Edge,
   MiniMap,
   ReactFlow,
+  MarkerType,
+  BackgroundVariant,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
@@ -174,22 +176,44 @@ function RelationalDiagramCanvas() {
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[72vh] p-0">
-            <ReactFlow<ErdFlowNode, Edge>
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={(_, node) => onSelectTable(node.id)}
-              onInit={setFlowInstance}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.15 }}
-              className="bg-background"
-            >
-              <MiniMap zoomable pannable />
-              <Controls />
-              <Background />
-            </ReactFlow>
+
+<ReactFlow
+  nodes={nodes}
+  edges={edges}
+  onNodesChange={onNodesChange}
+  onEdgesChange={onEdgesChange}
+  onNodeClick={(_, node) => onSelectTable(node.id)}
+  onNodeMouseEnter={(_, node) => {
+    setEdges((eds) => 
+      eds.map((e) => {
+        if (e.source === node.id || e.target === node.id) {
+          return { ...e, className: 'animated-edge' };
+        }
+        return e;
+      })
+    );
+  }}
+  onNodeMouseLeave={() => {
+    setEdges((eds) => 
+      eds.map((e) => ({ ...e, className: '' }))
+    );
+  }}
+  onInit={setFlowInstance}
+  nodeTypes={nodeTypes}
+  fitView
+  fitViewOptions={{ padding: 0.2 }}
+  className="bg-background"
+>
+  <Background 
+    color="hsl(var(--muted-foreground))" 
+    variant={BackgroundVariant.Dots} 
+    gap={24} 
+    size={1} 
+    opacity={0.2}
+  />
+  <Controls />
+</ReactFlow>
+
           </CardContent>
         </Card>
       </div>
