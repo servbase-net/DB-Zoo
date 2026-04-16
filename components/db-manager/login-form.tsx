@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -34,11 +34,20 @@ const engines: { value: DatabaseEngine; label: string; disabled?: boolean }[] = 
   { value: "sqlite", label: "SQLite", disabled: true },
 ];
 
+type FieldKey = "host" | "port" | "username" | "password" | "databaseName";
+
 export function LoginForm() {
   const router = useRouter();
   const { setSessionId } = useActiveSession();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
+
+  const hostRef = useRef<HTMLInputElement>(null);
+  const portRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const databaseNameRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     engine: "mysql" as DatabaseEngine,
@@ -58,9 +67,42 @@ export function LoginForm() {
       engine,
       port: getDefaultPort(engine),
     }));
+    setErrors((prev) => ({ ...prev, databaseName: undefined }));
   };
 
+  const getInputClassName = (field: FieldKey, withLeftIcon = false, withRightIcon = false) =>
+    cn(
+      "h-11 rounded-xl border-border/60 bg-background/50 focus-visible:ring-primary/20",
+      withLeftIcon && "pl-10",
+      withRightIcon && "px-10",
+      errors[field] && "border-red-500 focus-visible:ring-red-500/20 focus-visible:border-red-500"
+    );
+
   async function connect() {
+    const nextErrors: Partial<Record<FieldKey, string>> = {};
+
+    if (!form.host.trim()) nextErrors.host = "Host is required";
+    if (!form.port) nextErrors.port = "Port is required";
+    if (!form.username.trim()) nextErrors.username = "Username is required";
+    if (!form.password.trim()) nextErrors.password = "Password is required";
+    if (form.engine === "postgresql" && !form.databaseName.trim()) {
+      nextErrors.databaseName = "Database is required";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      toast.error("Please fill in all required fields");
+
+      if (nextErrors.host) hostRef.current?.focus();
+      else if (nextErrors.port) portRef.current?.focus();
+      else if (nextErrors.username) usernameRef.current?.focus();
+      else if (nextErrors.password) passwordRef.current?.focus();
+      else if (nextErrors.databaseName) databaseNameRef.current?.focus();
+
+      return;
+    }
+
+    setErrors({});
     setIsLoading(true);
     try {
       const res = await fetch("/api/auth/connect", {
@@ -90,7 +132,6 @@ export function LoginForm() {
       <div className="absolute left-1/2 top-0 -z-10 h-[240px] w-[240px] -translate-x-1/2 rounded-full bg-primary/10 blur-[100px] sm:h-[420px] sm:w-[420px] lg:left-1/4 lg:h-[520px] lg:w-[520px] lg:translate-x-0" />
 
       <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-14 xl:gap-20">
-
         <div className="order-1 flex flex-col justify-center space-y-6 lg:space-y-10">
           <motion.div initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} className="space-y-4 lg:space-y-6 text-center lg:text-left">
             <div className="flex justify-center lg:justify-start">
@@ -126,16 +167,16 @@ export function LoginForm() {
 
           <div className="hidden md:flex flex flex-wrap items-center justify-center lg:justify-start gap-4 sm:gap-8">
             <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
-               <Cpu className="h-3 w-3 sm:h-4 w-4" />
-               Next.js
+              <Cpu className="h-3 w-3 sm:h-4 w-4" />
+              Next.js
             </div>
             <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
-               <Code2 className="h-3 w-3 sm:h-4 w-4" />
-               Type-Safe
+              <Code2 className="h-3 w-3 sm:h-4 w-4" />
+              Type-Safe
             </div>
             <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black tracking-widest uppercase text-muted-foreground/40">
-               <ShieldCheck className="h-3 w-3 sm:h-4 w-4" />
-               Encrypted
+              <ShieldCheck className="h-3 w-3 sm:h-4 w-4" />
+              Encrypted
             </div>
           </div>
         </div>
@@ -189,24 +230,34 @@ export function LoginForm() {
                     <div className="space-y-1.5 sm:col-span-2">
                       <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Host Address</Label>
                       <div className="group relative">
-                        <Server className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary" />
+                        <Server className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors group-focus-within:text-primary", errors.host ? "text-red-500" : "text-muted-foreground")} />
                         <Input
+                          ref={hostRef}
                           placeholder="localhost"
                           value={form.host}
-                          onChange={(e) => setForm((prev) => ({ ...prev, host: e.target.value }))}
-                          className="h-11 rounded-xl border-border/60 bg-background/50 pl-10 focus-visible:ring-primary/20"
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, host: e.target.value }));
+                            if (errors.host) setErrors((prev) => ({ ...prev, host: undefined }));
+                          }}
+                          className={getInputClassName("host", true)}
                         />
                       </div>
+                      {errors.host && <p className="text-[10px] sm:text-xs text-red-500">{errors.host}</p>}
                     </div>
 
                     <div className="space-y-1.5">
                       <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Port</Label>
                       <Input
+                        ref={portRef}
                         type="number"
                         value={form.port}
-                        onChange={(e) => setForm((prev) => ({ ...prev, port: Number(e.target.value) }))}
-                        className="h-11 rounded-xl border-border/60 bg-background/50 focus-visible:ring-primary/20"
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, port: Number(e.target.value) }));
+                          if (errors.port) setErrors((prev) => ({ ...prev, port: undefined }));
+                        }}
+                        className={getInputClassName("port")}
                       />
+                      {errors.port && <p className="text-[10px] sm:text-xs text-red-500">{errors.port}</p>}
                     </div>
                   </div>
 
@@ -214,23 +265,32 @@ export function LoginForm() {
                     <Label className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Credentials</Label>
                     <div className="space-y-3">
                       <div className="group relative">
-                        <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary" />
+                        <User className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within:text-primary", errors.username ? "text-red-500" : "text-muted-foreground")} />
                         <Input
+                          ref={usernameRef}
                           placeholder="Username"
                           value={form.username}
-                          onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
-                          className="h-11 rounded-xl border-border/60 bg-background/50 pl-10 focus-visible:ring-primary/20"
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, username: e.target.value }));
+                            if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
+                          }}
+                          className={getInputClassName("username", true)}
                         />
                       </div>
+                      {errors.username && <p className="text-[10px] sm:text-xs text-red-500">{errors.username}</p>}
 
                       <div className="group relative">
-                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary" />
+                        <Lock className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within:text-primary", errors.password ? "text-red-500" : "text-muted-foreground")} />
                         <Input
+                          ref={passwordRef}
                           type={showPassword ? "text" : "password"}
                           placeholder="Password"
                           value={form.password}
-                          onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-                          className="h-11 rounded-xl border-border/60 bg-background/50 px-10 focus-visible:ring-primary/20"
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, password: e.target.value }));
+                            if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                          }}
+                          className={getInputClassName("password", false, true)}
                         />
                         <button
                           type="button"
@@ -244,6 +304,22 @@ export function LoginForm() {
                           )}
                         </button>
                       </div>
+                      {errors.password && <p className="text-[10px] sm:text-xs text-red-500">{errors.password}</p>}
+
+                      <div className="group relative">
+                        <Database className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within:text-primary", errors.databaseName ? "text-red-500" : "text-muted-foreground")} />
+                        <Input
+                          ref={databaseNameRef}
+                          placeholder="Database"
+                          value={form.databaseName}
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, databaseName: e.target.value }));
+                            if (errors.databaseName) setErrors((prev) => ({ ...prev, databaseName: undefined }));
+                          }}
+                          className={getInputClassName("databaseName", true)}
+                        />
+                      </div>
+                      {errors.databaseName && <p className="text-[10px] sm:text-xs text-red-500">{errors.databaseName}</p>}
                     </div>
                   </div>
                 </div>
