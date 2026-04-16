@@ -29,7 +29,7 @@ function buildConfig(input: ConnectionInput) {
     port: input.port ?? 3306,
     user: input.username,
     password: input.password,
-    database: input.databaseName,
+    database: input.databaseName?.trim() || undefined,
     connectTimeout: 5000,
   };
 }
@@ -43,7 +43,10 @@ export class MySqlProvider implements DatabaseProvider {
 
   async connect(input: ConnectionInput): Promise<void> {
     const mysql = getMysqlModule();
-    const conn = await mysql.createConnection(buildConfig(input));
+    const conn = await mysql.createConnection({
+      ...buildConfig(input),
+      database: input.databaseName?.trim() || undefined,
+    });
     await conn.ping();
     await conn.end();
   }

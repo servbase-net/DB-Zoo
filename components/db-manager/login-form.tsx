@@ -119,6 +119,13 @@ export function LoginForm() {
 
       setSessionId(payload.data.sessionId as string);
       toast.success("Connection established");
+
+      if (form.databaseName.trim()) {
+        localStorage.setItem("dbzoo.activeDatabase", form.databaseName.trim());
+        localStorage.setItem("dbzoo.activeSchema", "");
+        window.dispatchEvent(new Event("dbzoo:db-context-changed"));
+      }
+
       router.push("/connections");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to connect");
