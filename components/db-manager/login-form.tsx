@@ -149,7 +149,7 @@ export function LoginForm() {
                 height={200}
                 priority
                 draggable={false}
-                className="h-auto w-[180px] select-none dark:invert sm:w-[280px] lg:w-[340px]"
+                className="h-auto w-[180px] select-none sm:w-[280px] lg:w-[340px]"
               />
             </div>
 
@@ -331,7 +331,7 @@ export function LoginForm() {
                   </div>
                 </div>
 
-                <div className="rounded-[1.5rem] border border-border/40 bg-gray-100/80 p-4 space-y-4">
+                <div className="rounded-[1.5rem] border border-border/40 bg-gray-100/80 dark:bg-gray-900/80 p-4 space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="space-y-0.5">
                       <Label htmlFor="save-conn" className="text-xs sm:text-sm font-semibold cursor-pointer">Save Connection</Label>

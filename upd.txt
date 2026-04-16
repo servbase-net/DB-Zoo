@@ -1,0 +1,509 @@
+diff --git a/app/globals.css b/app/globals.css
+index f132cca..5afa021 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -3,6 +3,7 @@
+ @tailwind utilities;
+ 
+ :root {
++  --background-2: rgba(243, 244, 246);
+   --background: 210 40% 98%;
+   --foreground: 222 47% 11%;
+   --card: 0 0% 100%;
+@@ -16,6 +17,7 @@
+ }
+ 
+ .dark {
++  --background-2: rgba(250, 250, 250);
+   --background: 222 45% 8%;
+   --foreground: 210 40% 98%;
+   --card: 222 40% 11%;
+@@ -124,4 +126,4 @@ body {
+ 
+ .react-flow__attribution {
+   display: none;
+-}
+\ No newline at end of file
++}
+diff --git a/components/db-manager/login-form.tsx b/components/db-manager/login-form.tsx
+index 550c24f..981df08 100644
+--- a/components/db-manager/login-form.tsx
++++ b/components/db-manager/login-form.tsx
+@@ -149,7 +149,7 @@ export function LoginForm() {
+                 height={200}
+                 priority
+                 draggable={false}
+-                className="h-auto w-[180px] select-none dark:invert sm:w-[280px] lg:w-[340px]"
++                className="h-auto w-[180px] select-none sm:w-[280px] lg:w-[340px]"
+               />
+             </div>
+ 
+@@ -331,7 +331,7 @@ export function LoginForm() {
+                   </div>
+                 </div>
+ 
+-                <div className="rounded-[1.5rem] border border-border/40 bg-gray-100/80 p-4 space-y-4">
++                <div className="rounded-[1.5rem] border border-border/40 bg-gray-100/80 dark:bg-gray-900/80 p-4 space-y-4">
+                   <div className="flex items-center justify-between gap-4">
+                     <div className="space-y-0.5">
+                       <Label htmlFor="save-conn" className="text-xs sm:text-sm font-semibold cursor-pointer">Save Connection</Label>
+diff --git a/lib/db/providers/postgresql.ts b/lib/db/providers/postgresql.ts
+index ccbbb85..ad250f7 100644
+--- a/lib/db/providers/postgresql.ts
++++ b/lib/db/providers/postgresql.ts
+@@ -7,12 +7,18 @@ const mock = new MockProvider();
+ type PgClientCtor = new (config?: Record<string, unknown>) => {
+   connect: () => Promise<void>;
+   end: () => Promise<void>;
+-  query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; fields: Array<{ name: string }>; rowCount: number | null }>;
++  query: (
++    sql: string,
++    params?: unknown[],
++  ) => Promise<{
++    rows: any[];
++    fields: Array<{ name: string }>;
++    rowCount: number | null;
++  }>;
+ };
+ 
+ function getPgClientCtor(): PgClientCtor {
+   try {
+-    // Lazy driver resolution: build works even when pg is not installed yet.
+     const req = eval("require") as (id: string) => { Client: PgClientCtor };
+     return req("pg").Client;
+   } catch {
+@@ -40,17 +46,18 @@ export class PostgreSqlProvider implements DatabaseProvider {
+   engine = "postgresql" as const;
+ 
+   async connect(input: ConnectionInput): Promise<void> {
+-    const client = getClient(input);
++    const client = getClient(input, input.databaseName);
+     await client.connect();
+     await client.end();
+   }
+ 
+   async testConnection(input: ConnectionInput) {
+     const started = Date.now();
+-    const client = getClient(input);
++    const client = getClient(input, input.databaseName);
+     await client.connect();
+     const result = await client.query("SELECT version()");
+     await client.end();
++
+     return {
+       ok: true,
+       latencyMs: Date.now() - started,
+@@ -59,101 +66,221 @@ export class PostgreSqlProvider implements DatabaseProvider {
+   }
+ 
+   async listDatabases(input: ConnectionInput) {
+-    const client = getClient(input, "postgres");
++    const client = getClient(input, input.databaseName ?? "postgres");
+     await client.connect();
+-    const res = await client.query("SELECT datname FROM pg_database WHERE datistemplate = false");
++
++    const res = await client.query(`
++      SELECT datname
++      FROM pg_database
++      WHERE datistemplate = false
++      ORDER BY datname
++    `);
++
+     await client.end();
+-    return res.rows.map((row) => ({ name: row.datname as string }));
++
++    return res.rows.map((row) => ({
++      name: row.datname as string,
++    }));
+   }
+ 
+-  async listSchemas(input: ConnectionInput) {
+-    const client = getClient(input);
++  async listSchemas(input: ConnectionInput, database?: string) {
++    const db = database ?? input.databaseName;
++    const client = getClient(input, db);
+     await client.connect();
+-    const res = await client.query("SELECT schema_name FROM information_schema.schemata");
++
++    const res = await client.query(`
++      SELECT schema_name
++      FROM information_schema.schemata
++      WHERE schema_name <> 'information_schema'
++        AND schema_name NOT LIKE 'pg_toast%'
++      ORDER BY
++        CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END,
++        schema_name
++    `);
++
+     await client.end();
+-    return res.rows.map((row) => ({ name: row.schema_name as string }));
++
++    return res.rows.map((row) => ({
++      name: row.schema_name as string,
++    }));
+   }
+ 
+-  async listObjects(input: ConnectionInput, args: { schema?: string }) {
+-    const client = getClient(input);
+-    await client.connect();
++  async listObjects(input: ConnectionInput, args: { database?: string; schema?: string }) {
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+-    const res = await client.query(
+-      "SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name",
+-      [schema],
+-    );
++    const client = getClient(input, db);
++    await client.connect();
++
++    const [tablesRes, viewsRes, functionsRes] = await Promise.all([
++      client.query(
++        `
++        SELECT table_name AS name
++        FROM information_schema.tables
++        WHERE table_schema = $1
++          AND table_type = 'BASE TABLE'
++        ORDER BY table_name
++        `,
++        [schema],
++      ),
++      client.query(
++        `
++        SELECT table_name AS name
++        FROM information_schema.views
++        WHERE table_schema = $1
++        ORDER BY table_name
++        `,
++        [schema],
++      ),
++      client.query(
++        `
++        SELECT routine_name AS name
++        FROM information_schema.routines
++        WHERE routine_schema = $1
++        ORDER BY routine_name
++        `,
++        [schema],
++      ),
++    ]);
++
+     await client.end();
+-    return res.rows.map((row) => ({ name: row.table_name as string, kind: "table" as const, schema }));
++
++    return [
++      ...tablesRes.rows.map((row) => ({
++        name: row.name as string,
++        kind: "table" as const,
++        schema,
++      })),
++      ...viewsRes.rows.map((row) => ({
++        name: row.name as string,
++        kind: "view" as const,
++        schema,
++      })),
++      ...functionsRes.rows.map((row) => ({
++        name: row.name as string,
++        kind: "function" as const,
++        schema,
++      })),
++    ];
+   }
+ 
+-  async getTableStructure(input: ConnectionInput, args: { schema?: string; table: string }) {
+-    const client = getClient(input);
+-    await client.connect();
++  async getTableStructure(
++    input: ConnectionInput,
++    args: { database?: string; schema?: string; table: string },
++  ) {
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
++    const client = getClient(input, db);
++    await client.connect();
++
+     const res = await client.query(
+-      `SELECT column_name, data_type, is_nullable, column_default
+-       FROM information_schema.columns
+-       WHERE table_schema = $1 AND table_name = $2
+-       ORDER BY ordinal_position`,
++      `
++      SELECT
++        column_name,
++        data_type,
++        is_nullable,
++        column_default
++      FROM information_schema.columns
++      WHERE table_schema = $1
++        AND table_name = $2
++      ORDER BY ordinal_position
++      `,
+       [schema, args.table],
+     );
++
+     await client.end();
++
+     return res.rows.map((row) => ({
+       name: row.column_name as string,
+       type: row.data_type as string,
+       nullable: row.is_nullable === "YES",
+-      defaultValue: row.column_default as string | null,
+-      isAutoIncrement: typeof row.column_default === "string" && row.column_default.includes("nextval"),
++      defaultValue: (row.column_default as string | null) ?? null,
++      isAutoIncrement:
++        typeof row.column_default === "string" && row.column_default.includes("nextval"),
+     }));
+   }
+ 
+-  async getTableIndexes(input: ConnectionInput, args: { schema?: string; table: string }) {
+-    const client = getClient(input);
+-    await client.connect();
++  async getTableIndexes(
++    input: ConnectionInput,
++    args: { database?: string; schema?: string; table: string },
++  ) {
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
++    const client = getClient(input, db);
++    await client.connect();
++
+     const res = await client.query(
+-      `SELECT i.relname as index_name, ix.indisunique as is_unique, a.attname as column_name
+-       FROM pg_class t, pg_class i, pg_index ix, pg_attribute a, pg_namespace ns
+-       WHERE t.oid = ix.indrelid
+-         AND i.oid = ix.indexrelid
+-         AND a.attrelid = t.oid
+-         AND a.attnum = ANY(ix.indkey)
+-         AND t.relnamespace = ns.oid
+-         AND ns.nspname = $1
+-         AND t.relname = $2`,
++      `
++      SELECT
++        i.relname AS index_name,
++        ix.indisunique AS is_unique,
++        a.attname AS column_name
++      FROM pg_class t
++      JOIN pg_namespace ns
++        ON ns.oid = t.relnamespace
++      JOIN pg_index ix
++        ON t.oid = ix.indrelid
++      JOIN pg_class i
++        ON i.oid = ix.indexrelid
++      JOIN pg_attribute a
++        ON a.attrelid = t.oid
++       AND a.attnum = ANY(ix.indkey)
++      WHERE ns.nspname = $1
++        AND t.relname = $2
++      `,
+       [schema, args.table],
+     );
++
+     await client.end();
++
+     const map = new Map<string, { name: string; columns: string[]; unique: boolean }>();
++
+     for (const row of res.rows) {
+       const name = row.index_name as string;
+-      if (!map.has(name)) map.set(name, { name, columns: [], unique: Boolean(row.is_unique) });
++      if (!map.has(name)) {
++        map.set(name, {
++          name,
++          columns: [],
++          unique: Boolean(row.is_unique),
++        });
++      }
+       map.get(name)!.columns.push(row.column_name as string);
+     }
++
+     return [...map.values()];
+   }
+ 
+-  async getTableForeignKeys(input: ConnectionInput, args: { schema?: string; table: string }) {
+-    const client = getClient(input);
+-    await client.connect();
++  async getTableForeignKeys(
++    input: ConnectionInput,
++    args: { database?: string; schema?: string; table: string },
++  ) {
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
++    const client = getClient(input, db);
++    await client.connect();
++
+     const res = await client.query(
+-      `SELECT
+-        tc.constraint_name as name,
+-        kcu.column_name as column_name,
++      `
++      SELECT
++        tc.constraint_name AS name,
++        kcu.column_name AS column_name,
+         ccu.table_name AS foreign_table_name,
+         ccu.column_name AS foreign_column_name
+-       FROM information_schema.table_constraints AS tc
+-       JOIN information_schema.key_column_usage AS kcu
+-         ON tc.constraint_name = kcu.constraint_name
+-       JOIN information_schema.constraint_column_usage AS ccu
+-         ON ccu.constraint_name = tc.constraint_name
+-       WHERE constraint_type = 'FOREIGN KEY'
+-         AND tc.table_schema = $1
+-         AND tc.table_name = $2`,
++      FROM information_schema.table_constraints AS tc
++      JOIN information_schema.key_column_usage AS kcu
++        ON tc.constraint_name = kcu.constraint_name
++       AND tc.table_schema = kcu.table_schema
++      JOIN information_schema.constraint_column_usage AS ccu
++        ON tc.constraint_name = ccu.constraint_name
++       AND tc.table_schema = ccu.table_schema
++      WHERE tc.constraint_type = 'FOREIGN KEY'
++        AND tc.table_schema = $1
++        AND tc.table_name = $2
++      `,
+       [schema, args.table],
+     );
++
+     await client.end();
++
+     return res.rows.map((row) => ({
+       name: row.name as string,
+       column: row.column_name as string,
+@@ -162,17 +289,30 @@ export class PostgreSqlProvider implements DatabaseProvider {
+     }));
+   }
+ 
+-  async getTableRows(input: ConnectionInput, args: { schema?: string; table: string; options: GetRowsOptions }) {
+-    const client = getClient(input);
+-    await client.connect();
++  async getTableRows(
++    input: ConnectionInput,
++    args: { database?: string; schema?: string; table: string; options: GetRowsOptions },
++  ) {
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
++    const client = getClient(input, db);
++    await client.connect();
++
+     const offset = (args.options.page - 1) * args.options.pageSize;
+-    const order = args.options.sortBy ? `ORDER BY "${args.options.sortBy}" ${args.options.sortDirection ?? "asc"}` : "";
++    const order = args.options.sortBy
++      ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}`
++      : "";
++
+     const rowsRes = await client.query(
+-      `SELECT * FROM "${schema}"."${args.table}" ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
++      `SELECT * FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
+     );
+-    const countRes = await client.query(`SELECT COUNT(*)::int as total FROM "${schema}"."${args.table}"`);
++
++    const countRes = await client.query(
++      `SELECT COUNT(*)::int AS total FROM ${quoteIdent(schema)}.${quoteIdent(args.table)}`,
++    );
++
+     await client.end();
++
+     return {
+       rows: rowsRes.rows,
+       total: Number(countRes.rows[0]?.total ?? 0),
+@@ -183,10 +323,13 @@ export class PostgreSqlProvider implements DatabaseProvider {
+ 
+   async runQuery(input: ConnectionInput, query: string) {
+     const started = Date.now();
+-    const client = getClient(input);
++    const client = getClient(input, input.databaseName);
+     await client.connect();
++
+     const res = await client.query(query);
++
+     await client.end();
++
+     return {
+       columns: res.fields.map((field) => field.name),
+       rows: res.rows as Record<string, unknown>[],
+@@ -205,17 +348,24 @@ export class PostgreSqlProvider implements DatabaseProvider {
+ 
+   async insertRow(input: ConnectionInput, args: Parameters<DatabaseProvider["insertRow"]>[1]) {
+     const keys = Object.keys(args.row);
+-    if (keys.length === 0) throw new Error("Row data is required");
++    if (keys.length === 0) {
++      throw new Error("Row data is required");
++    }
++
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+-    const client = getClient(input, args.database ?? input.databaseName);
++    const client = getClient(input, db);
+     await client.connect();
++
+     const columnsSql = keys.map(quoteIdent).join(", ");
+     const valuesSql = keys.map((_, idx) => `$${idx + 1}`).join(", ");
+     const values = keys.map((key) => args.row[key] ?? null);
++
+     await client.query(
+       `INSERT INTO ${quoteIdent(schema)}.${quoteIdent(args.table)} (${columnsSql}) VALUES (${valuesSql})`,
+       values,
+     );
++
+     await client.end();
+   }
+ 
+@@ -223,18 +373,33 @@ export class PostgreSqlProvider implements DatabaseProvider {
+     if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+       throw new Error("Primary key is required for updates");
+     }
++
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const pkKeys = Object.keys(args.primaryKey);
+     const setKeys = Object.keys(args.row).filter((key) => !pkKeys.includes(key));
+-    if (setKeys.length === 0) return;
+-    const client = getClient(input, args.database ?? input.databaseName);
++
++    if (setKeys.length === 0) {
++      return;
++    }
++
++    const client = getClient(input, db);
+     await client.connect();
++
+     const setSql = setKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(", ");
+     const whereSql = pkKeys
+       .map((key, idx) => `${quoteIdent(key)} = $${setKeys.length + idx + 1}`)
+       .join(" AND ");
+-    const values = [...setKeys.map((key) => args.row[key] ?? null), ...pkKeys.map((key) => args.primaryKey?.[key] ?? null)];
+-    await client.query(`UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${whereSql}`, values);
++    const values = [
++      ...setKeys.map((key) => args.row[key] ?? null),
++      ...pkKeys.map((key) => args.primaryKey?.[key] ?? null),
++    ];
++
++    await client.query(
++      `UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${whereSql}`,
++      values,
++    );
++
+     await client.end();
+   }
+ 
+@@ -242,13 +407,21 @@ export class PostgreSqlProvider implements DatabaseProvider {
+     if (!args.primaryKey || Object.keys(args.primaryKey).length === 0) {
+       throw new Error("Primary key is required for deletes");
+     }
++
++    const db = args.database ?? input.databaseName;
+     const schema = args.schema ?? "public";
+     const pkKeys = Object.keys(args.primaryKey);
+-    const client = getClient(input, args.database ?? input.databaseName);
++    const client = getClient(input, db);
+     await client.connect();
++
+     const whereSql = pkKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(" AND ");
+     const values = pkKeys.map((key) => args.primaryKey?.[key] ?? null);
+-    await client.query(`DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereSql}`, values);
++
++    await client.query(
++      `DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereSql}`,
++      values,
++    );
++
+     await client.end();
+   }
+ 
