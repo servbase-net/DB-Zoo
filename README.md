@@ -103,7 +103,7 @@ SESSION_SECRET="dev-session-secret"
 | MySQL        | `mysql2`          | ✅     |
 | MariaDB      | `mysql2`          | ✅     |
 | PostgreSQL   | `pg`              | ✅     |
-| SQLite       | `better-sqlite3`  | ✅     |
+| SQLite       | `better-sqlite3`  | 🔄     |
 | MongoDB      | Planned           | 🔄     |
 
 ---
