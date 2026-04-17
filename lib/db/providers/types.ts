@@ -4,6 +4,7 @@ import type {
   DbDatabase,
   DbObjectRef,
   DbSchema,
+  ExportResult,
   QueryResult,
   ServerInfo,
   TableColumn,
@@ -23,10 +24,30 @@ export type GetRowsOptions = {
 export type CreateTableColumnInput = {
   name: string;
   type: string;
+  length?: number;
   nullable?: boolean;
   defaultValue?: string | null;
+  isPrimaryKey?: boolean;
   primaryKey?: boolean;
+  isAutoIncrement?: boolean;
   autoIncrement?: boolean;
+  unique?: boolean;
+};
+
+export type CreateTableIndexInput = {
+  name: string;
+  columns: string[];
+  unique?: boolean;
+};
+
+export type CreateTableForeignKeyInput = {
+  name: string;
+  column: string;
+  referenceSchema?: string;
+  referenceTable: string;
+  referenceColumn: string;
+  onDelete?: string;
+  onUpdate?: string;
 };
 
 export type CreateTableInput = {
@@ -34,6 +55,8 @@ export type CreateTableInput = {
   schema?: string;
   table: string;
   columns: CreateTableColumnInput[];
+  indexes?: CreateTableIndexInput[];
+  foreignKeys?: CreateTableForeignKeyInput[];
 };
 
 export type RowMutationInput = {
@@ -42,6 +65,8 @@ export type RowMutationInput = {
   table: string;
   row: Record<string, unknown>;
   primaryKey?: Record<string, unknown>;
+  where?: string;
+  whereParams?: unknown[];
 };
 
 export type ExportInput = {
@@ -56,7 +81,7 @@ export type ImportInput = {
   schema?: string;
   table: string;
   format: "csv" | "sql";
-  payload: string;
+  data: string;
 };
 
 export interface DatabaseProvider {
@@ -88,7 +113,7 @@ export interface DatabaseProvider {
   insertRow(input: ConnectionInput, args: RowMutationInput): Promise<void>;
   updateRow(input: ConnectionInput, args: RowMutationInput): Promise<void>;
   deleteRow(input: ConnectionInput, args: RowMutationInput): Promise<void>;
-  exportTable(input: ConnectionInput, args: ExportInput): Promise<string>;
+  exportTable(input: ConnectionInput, args: ExportInput): Promise<ExportResult>;
   importData(input: ConnectionInput, args: ImportInput): Promise<{ inserted: number; warnings: string[] }>;
   getServerInfo(input: ConnectionInput): Promise<ServerInfo>;
 }

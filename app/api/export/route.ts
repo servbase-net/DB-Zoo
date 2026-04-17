@@ -15,10 +15,11 @@ export async function POST(request: NextRequest) {
       format: parsed.format,
     });
     const ext = parsed.format === "csv" ? "csv" : "sql";
-    return new NextResponse(payload, {
+
+    return new NextResponse(payload.data, {
       headers: {
-        "Content-Type": parsed.format === "csv" ? "text/csv" : "application/sql",
-        "Content-Disposition": `attachment; filename=\"${parsed.table}.${ext}\"`,
+        "Content-Type": payload.mimeType,
+        "Content-Disposition": `attachment; filename="${parsed.table}.${ext}"`,
       },
     });
   } catch (error) {

@@ -81,3 +81,8 @@ export type ServerInfo = {
   collation?: string;
   capabilities: string[];
 };
+
+export type ExportResult = {
+  data: string;
+  mimeType: string;
+};

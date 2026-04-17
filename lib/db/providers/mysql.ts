@@ -407,7 +407,7 @@ export class MySqlProvider implements DatabaseProvider {
   async importData(
     input: ConnectionInput,
     args: Parameters<DatabaseProvider["importData"]>[1],
-  ): Promise<{ rowsImported: number }> {
+  ): Promise<{ inserted: number; warnings: string[] }> {
     const { database, table, data, format } = args;
     const db = database ?? input.databaseName;
     if (!db) throw new Error("Database name required for import");
@@ -421,14 +421,14 @@ export class MySqlProvider implements DatabaseProvider {
       try {
         await conn.query(data);
         // Rows affected is hard to determine for arbitrary SQL; return estimate
-        return { rowsImported: -1 };
+        return { inserted: -1, warnings: [] };
       } finally {
         await conn.end();
       }
     } else if (format === "csv") {
       // Parse CSV and use batch insert
       const lines = data.split("\n").filter((line) => line.trim());
-      if (lines.length < 2) return { rowsImported: 0 };
+      if (lines.length < 2) return { inserted: 0, warnings: [] };
       const headers = lines[0].split(",").map((h) => h.trim());
       const rows = lines.slice(1).map((line) => {
         // Naive CSV parsing – improve if needed
@@ -461,7 +461,7 @@ export class MySqlProvider implements DatabaseProvider {
           const [result] = await conn.query(sql, values);
           imported += (result as { affectedRows: number }).affectedRows;
         }
-        return { rowsImported: imported };
+        return { inserted: imported, warnings: [] };
       } finally {
         await conn.end();
       }

@@ -30,7 +30,7 @@ function getDb(input: ConnectionInput) {
 }
 
 function quoteIdent(value: string) {
-  return `"${value.replace(/"/g, "\"\"")}"`;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 export class SqliteProvider implements DatabaseProvider {
@@ -64,7 +64,10 @@ export class SqliteProvider implements DatabaseProvider {
       .prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name")
       .all() as Array<{ name: string; type: string }>;
     db.close();
-    return rows.map((row) => ({ name: row.name, kind: row.type === "view" ? ("view" as const) : ("table" as const) }));
+    return rows.map((row) => ({
+      name: row.name,
+      kind: row.type === "view" ? ("view" as const) : ("table" as const),
+    }));
   }
 
   async getTableStructure(input: ConnectionInput, args: { table: string }) {
@@ -119,13 +122,19 @@ export class SqliteProvider implements DatabaseProvider {
     const rows = db.prepare(`SELECT * FROM "${args.table}" ${order} LIMIT ? OFFSET ?`).all(args.options.pageSize, offset);
     const total = Number((db.prepare(`SELECT COUNT(*) as total FROM "${args.table}"`).get() as { total: number }).total);
     db.close();
-    return { rows: rows as Record<string, unknown>[], total, page: args.options.page, pageSize: args.options.pageSize };
+    return {
+      rows: rows as Record<string, unknown>[],
+      total,
+      page: args.options.page,
+      pageSize: args.options.pageSize,
+    };
   }
 
   async runQuery(input: ConnectionInput, query: string) {
     const db = getDb(input);
     const started = Date.now();
     const statement = db.prepare(query);
+
     if (statement.reader) {
       const rows = statement.all() as Record<string, unknown>[];
       db.close();
@@ -135,6 +144,7 @@ export class SqliteProvider implements DatabaseProvider {
         durationMs: Date.now() - started,
       };
     }
+
     const run = statement.run();
     db.close();
     return { affectedRows: run.changes, durationMs: Date.now() - started };
@@ -166,10 +176,14 @@ export class SqliteProvider implements DatabaseProvider {
     const pkKeys = Object.keys(args.primaryKey);
     const setKeys = Object.keys(args.row).filter((key) => !pkKeys.includes(key));
     if (setKeys.length === 0) return;
+
     const db = getDb(input);
     const setSql = setKeys.map((key) => `${quoteIdent(key)} = ?`).join(", ");
     const whereSql = pkKeys.map((key) => `${quoteIdent(key)} = ?`).join(" AND ");
-    const values = [...setKeys.map((key) => args.row[key] ?? null), ...pkKeys.map((key) => args.primaryKey?.[key] ?? null)];
+    const values = [
+      ...setKeys.map((key) => args.row[key] ?? null),
+      ...pkKeys.map((key) => args.primaryKey?.[key] ?? null),
+    ];
     db.prepare(`UPDATE ${quoteIdent(args.table)} SET ${setSql} WHERE ${whereSql}`).run(...values);
     db.close();
   }
@@ -186,11 +200,17 @@ export class SqliteProvider implements DatabaseProvider {
     db.close();
   }
 
-  async exportTable(input: ConnectionInput, args: Parameters<DatabaseProvider["exportTable"]>[1]) {
+  async exportTable(
+    input: ConnectionInput,
+    args: Parameters<DatabaseProvider["exportTable"]>[1],
+  ): ReturnType<DatabaseProvider["exportTable"]> {
     return mock.exportTable(input, args);
   }
 
-  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]) {
+  async importData(
+    input: ConnectionInput,
+    args: Parameters<DatabaseProvider["importData"]>[1],
+  ): ReturnType<DatabaseProvider["importData"]> {
     return mock.importData(input, args);
   }
 

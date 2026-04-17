@@ -473,7 +473,7 @@ export class PostgreSqlProvider implements DatabaseProvider {
     return mock.exportTable(input, args);
   }
 
-  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]): Promise<{ rowsImported: number }> {
+  async importData(input: ConnectionInput, args: Parameters<DatabaseProvider["importData"]>[1]): Promise<{ inserted: number; warnings: string[] }> {
     const { database, schema, table, data, format } = args;
     const db = database ?? input.databaseName;
     const sch = schema ?? "public";
@@ -485,10 +485,10 @@ export class PostgreSqlProvider implements DatabaseProvider {
         await client.query("BEGIN");
         for (const stmt of splitSqlStatements(data)) await client.query(stmt);
         await client.query("COMMIT");
-        return { rowsImported: -1 };
+        return { inserted: -1, warnings: [] };
       } else if (format === "csv") {
         const lines = data.split("\n").filter(l => l.trim());
-        if (lines.length < 2) return { rowsImported: 0 };
+        if (lines.length < 2) return { inserted: 0, warnings: [] };
         const headers = lines[0].split(",").map(h => h.trim());
         const rows = lines.slice(1).map(line => {
           const values = line.split(",").map(v => v.trim().startsWith('"') ? JSON.parse(v.trim()) : (v.trim() === "" ? null : v.trim()));
@@ -504,7 +504,7 @@ export class PostgreSqlProvider implements DatabaseProvider {
           const result = await client.query(`INSERT INTO ${quoteIdent(sch)}.${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")}) VALUES ${placeholders}`, batch.flatMap(r => columns.map(c => r[c] ?? null)));
           imported += result.rowCount ?? 0;
         }
-        return { rowsImported: imported };
+        return { inserted: imported, warnings: [] };
       }
     } finally { await client.end(); }
     return mock.importData(input, args);

@@ -12,7 +12,7 @@ export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
     <div
       className={cn(
         "erd-node-container min-w-[260px] overflow-hidden rounded-lg border bg-card shadow-2xl",
-        selected || data.highlighted 
+        selected || data.isHighlighted 
           ? "border-foreground ring-1 ring-foreground/20 dark:border-emerald-500 dark:ring-emerald-500/50" 
           : "border-border"
       )}

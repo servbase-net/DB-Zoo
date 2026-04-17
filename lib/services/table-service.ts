@@ -69,6 +69,7 @@ export async function insertRow(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot insert rows");
+
   const normalizedArgs = {
     ...args,
     row: normalizeRowDates(args.row),
@@ -97,12 +98,14 @@ export async function updateRow(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot update rows");
+
   const normalizedArgs = {
     ...args,
     row: normalizeRowDates(args.row),
   };
 
   await provider.updateRow(input, normalizedArgs);
+
   await writeAuditLog({
     actorRole: "operator",
     action: "row.update",
@@ -118,7 +121,9 @@ export async function deleteRow(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot delete rows");
+
   await provider.deleteRow(input, { ...args, row: {}, primaryKey: args.primaryKey });
+
   await writeAuditLog({
     actorRole: "operator",
     action: "row.delete",
@@ -149,14 +154,29 @@ export async function importTableData(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot import");
+
   if (args.format === "csv") {
     const rows = parse(args.payload, { columns: true, skip_empty_lines: true });
+
     for (const row of rows as Record<string, unknown>[]) {
-      await provider.insertRow(input, { ...args, row });
+      await provider.insertRow(input, {
+        database: args.database,
+        schema: args.schema,
+        table: args.table,
+        row,
+      });
     }
+
     return { inserted: rows.length, warnings: [] as string[] };
   }
-  return provider.importData(input, args);
+
+  return provider.importData(input, {
+    database: args.database,
+    schema: args.schema,
+    table: args.table,
+    format: args.format,
+    data: args.payload,
+  });
 }
 
 export async function createTable(
@@ -177,11 +197,13 @@ export async function createTable(
 ) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot create tables");
+
   await provider.createTable(input, args);
 }
 
 export async function alterTable(sessionId: string, sql: string) {
   const { provider, input } = await getProviderFromSession(sessionId);
   if (input.readOnly) throw new Error("Read-only connection cannot alter tables");
+
   await provider.alterTable(input, sql);
 }
