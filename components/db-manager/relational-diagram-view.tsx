@@ -199,6 +199,7 @@ function RelationalDiagramCanvas() {
               fitView
               fitViewOptions={{ padding: 0.2 }}
               className="bg-background"
+              minZoom={0.01}
             >
               <Background 
                 color="hsl(var(--foreground))" 
@@ -206,7 +207,7 @@ function RelationalDiagramCanvas() {
                 gap={24} 
                 size={1}
               />
-              <Controls />
+              {/* <Controls /> */}
               <MiniMap 
                 nodeColor="#10b981" 
                 maskColor="rgba(0, 0, 0, 0.7)" 
