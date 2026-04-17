@@ -7,6 +7,15 @@ import type { ErdTableNodeData } from "@/lib/erd/graph";
 
 type ErdNode = Node<ErdTableNodeData, "erdTable">;
 
+// Helper to clean up long types for display
+const formatType = (type: string) => {
+  const lower = type.toLowerCase();
+  if (lower.startsWith("enum") || lower.startsWith("set")) {
+    return type.replace(/\(.*\)/, "(...)");
+  }
+  return type;
+};
+
 export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
   return (
     <div
@@ -48,8 +57,8 @@ export function ErdTableNode({ data, selected }: NodeProps<ErdNode>) {
               </span>
             </div>
 
-            <span className="text-[10px] font-mono text-muted-foreground uppercase">
-              {column.type}
+            <span className="text-[10px] font-mono text-muted-foreground uppercase ml-4">
+              {formatType(column.type)}
             </span>
 
             <Handle type="source" id={column.id} position={Position.Right} />

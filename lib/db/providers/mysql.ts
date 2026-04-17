@@ -112,6 +112,7 @@ export class MySqlProvider implements DatabaseProvider {
     });
     const [rows] = await conn.query(`SHOW COLUMNS FROM ${quoteIdent(args.table)}`);
     await conn.end();
+
     return (rows as Array<Record<string, string>>).map((row) => ({
       name: row.Field,
       type: row.Type,
