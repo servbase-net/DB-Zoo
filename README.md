@@ -4,6 +4,8 @@
 
 > **Modern phpMyAdmin-inspired database management tool** built with Next.js App Router and TypeScript.
 
+<img src="https://raw.githubusercontent.com/servbase-net/DB-Zoo/refs/heads/main/public/Showcase.png">
+
 ---
 
 > [!NOTE]
