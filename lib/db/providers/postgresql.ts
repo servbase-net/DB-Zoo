@@ -179,9 +179,12 @@ export class PostgreSqlProvider implements DatabaseProvider {
   }
 
   async listDatabases(input: ConnectionInput) {
-    const client = getClient(input, "postgres");
+    // Customers may connect only to their own databases, so list from that database and only what the role can open.
+    const client = getClient(input);
     await client.connect();
-    const res = await client.query(`SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname`);
+    const res = await client.query(
+      `SELECT datname FROM pg_database WHERE datistemplate = false AND has_database_privilege(datname, 'CONNECT') ORDER BY datname`
+    );
     await client.end();
     return res.rows.map((row) => ({ name: row.datname as string }));
   }
