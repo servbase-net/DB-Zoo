@@ -19,6 +19,18 @@ function toMySQLDateTime(value: string | Date) {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
+// MySQL rejects ISO timestamps; Postgres and SQLite accept them and must keep their time zone.
+// Non-Postgres drivers also cannot bind objects, so JSON values are sent as text.
+// (Postgres handles JSON per column type inside the provider.)
+function normalizeRow(engine: string, row: Record<string, unknown>) {
+  if (engine === "postgresql") return row;
+  const next = engine === "mysql" || engine === "mariadb" ? normalizeRowDates(row) : { ...row };
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== null && typeof value === "object" && !(value instanceof Date)) next[key] = JSON.stringify(value);
+  }
+  return next;
+}
+
 function normalizeRowDates(row: Record<string, unknown>) {
   const next = { ...row };
 
@@ -72,7 +84,7 @@ export async function insertRow(
 
   const normalizedArgs = {
     ...args,
-    row: normalizeRowDates(args.row),
+    row: normalizeRow(input.engine, args.row),
   };
 
   await provider.insertRow(input, normalizedArgs);
@@ -101,7 +113,7 @@ export async function updateRow(
 
   const normalizedArgs = {
     ...args,
-    row: normalizeRowDates(args.row),
+    row: normalizeRow(input.engine, args.row),
   };
 
   await provider.updateRow(input, normalizedArgs);
@@ -137,7 +149,14 @@ export async function duplicateRow(
   sessionId: string,
   args: { database?: string; schema?: string; table: string; row: Record<string, unknown> },
 ) {
-  return insertRow(sessionId, args);
+  // Copy everything except columns the database fills in itself (serial, identity, PK with a default).
+  const { provider, input } = await getProviderFromSession(sessionId);
+  const columns = await provider.getTableStructure(input, args);
+  const skip = new Set(
+    columns.filter((c) => c.isAutoIncrement || (c.isPrimaryKey && c.defaultValue != null)).map((c) => c.name),
+  );
+  const row = Object.fromEntries(Object.entries(args.row).filter(([key]) => !skip.has(key)));
+  return insertRow(sessionId, { ...args, row });
 }
 
 export async function exportTable(

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getProvider } from "@/lib/db/provider-factory";
 import { createConnectionSession, getConnectionInputFromSession } from "@/lib/session/connection-session";
 import { decryptString, encryptString } from "@/lib/security/encryption";
+import { SESSION_TTL_MS } from "@/lib/session/owner";
 import type { ConnectionInput, DatabaseEngine } from "@/lib/types/db";
 import {
   fallbackDeleteConnection,
@@ -18,6 +19,24 @@ function normalizeEngine(engine: string): DatabaseEngine {
   return "mysql";
 }
 
+class NotFoundError extends Error {
+  constructor() {
+    super("Connection not found");
+  }
+}
+
+// Throws NotFoundError unless the row exists and belongs to ownerId.
+async function findOwned(ownerId: string, id: string) {
+  const row = await prisma.savedConnection.findFirst({ where: { id, ownerId }, select: { id: true } });
+  if (!row) throw new NotFoundError();
+}
+
+// Never send credentials or owner ids to the client.
+function toPublic<T extends { encryptedPassword?: string | null; ownerId?: string }>(row: T) {
+  const { encryptedPassword: _secret, ownerId: _owner, ...rest } = row;
+  return rest;
+}
+
 export async function testConnection(input: ConnectionInput) {
   const provider = getProvider(input);
   return provider.testConnection(input);
@@ -29,11 +48,12 @@ export async function connectAndCreateSession(input: ConnectionInput, label?: st
   return createConnectionSession(input, label);
 }
 
-export async function saveConnection(input: ConnectionInput & { name: string; tags?: string[] }) {
+export async function saveConnection(ownerId: string, input: ConnectionInput & { name: string; tags?: string[] }) {
   const encryptedPassword = input.password ? encryptString(input.password) : null;
   try {
-    return await prisma.savedConnection.create({
+    return toPublic(await prisma.savedConnection.create({
       data: {
+        ownerId,
         name: input.name,
         engine: input.engine,
         host: input.host,
@@ -45,9 +65,10 @@ export async function saveConnection(input: ConnectionInput & { name: string; ta
         readOnly: Boolean(input.readOnly),
         tags: input.tags ? JSON.stringify(input.tags) : null,
       },
-    });
+    }));
   } catch {
-    return fallbackSaveConnection({
+    return toPublic(fallbackSaveConnection({
+      ownerId,
       name: input.name,
       engine: input.engine,
       host: input.host,
@@ -58,11 +79,11 @@ export async function saveConnection(input: ConnectionInput & { name: string; ta
       sqlitePath: input.sqlitePath,
       readOnly: Boolean(input.readOnly),
       tags: input.tags ?? [],
-    });
+    }));
   }
 }
 
-export async function listSavedConnections() {
+export async function listSavedConnections(ownerId: string) {
   let rows: Array<{
     id: string;
     name: string;
@@ -79,11 +100,13 @@ export async function listSavedConnections() {
     updatedAt: Date;
   }> = [];
   try {
+    await prisma.savedConnection.deleteMany({ where: { createdAt: { lte: new Date(Date.now() - SESSION_TTL_MS) } } });
     rows = await prisma.savedConnection.findMany({
+      where: { ownerId },
       orderBy: { updatedAt: "desc" },
     });
   } catch {
-    rows = fallbackListConnections().map((row) => ({
+    rows = fallbackListConnections(ownerId).map((row) => ({
       id: row.id,
       name: row.name,
       engine: row.engine,
@@ -99,7 +122,7 @@ export async function listSavedConnections() {
       updatedAt: row.updatedAt,
     }));
   }
-  return rows.map((row) => ({
+  return rows.map(({ encryptedPassword: _secret, ...row }) => ({
     ...row,
     engine: normalizeEngine(row.engine),
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : [],
@@ -107,11 +130,13 @@ export async function listSavedConnections() {
 }
 
 export async function updateSavedConnection(
+  ownerId: string,
   id: string,
   input: Partial<ConnectionInput & { name: string; tags?: string[] }>,
 ) {
   try {
-    return await prisma.savedConnection.update({
+    await findOwned(ownerId, id);
+    return toPublic(await prisma.savedConnection.update({
       where: { id },
       data: {
         name: input.name,
@@ -125,9 +150,10 @@ export async function updateSavedConnection(
         readOnly: input.readOnly,
         tags: input.tags ? JSON.stringify(input.tags) : undefined,
       },
-    });
-  } catch {
-    return fallbackUpdateConnection(id, {
+    }));
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    return toPublic(fallbackUpdateConnection(ownerId, id, {
       name: input.name,
       engine: input.engine,
       host: input.host,
@@ -138,27 +164,29 @@ export async function updateSavedConnection(
       sqlitePath: input.sqlitePath,
       readOnly: input.readOnly,
       tags: input.tags,
-    });
+    }));
   }
 }
 
-export async function deleteSavedConnection(id: string) {
+export async function deleteSavedConnection(ownerId: string, id: string) {
   try {
+    await findOwned(ownerId, id);
     return await prisma.savedConnection.delete({ where: { id } });
-  } catch {
-    fallbackDeleteConnection(id);
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    fallbackDeleteConnection(ownerId, id);
     return { id };
   }
 }
 
-export async function buildConnectionInputFromSaved(id: string): Promise<ConnectionInput> {
-  let row = null as Awaited<ReturnType<typeof prisma.savedConnection.findUnique>> | ReturnType<typeof fallbackFindConnection>;
+export async function buildConnectionInputFromSaved(ownerId: string, id: string): Promise<ConnectionInput> {
+  let row = null as Awaited<ReturnType<typeof prisma.savedConnection.findFirst>> | ReturnType<typeof fallbackFindConnection>;
   try {
-    row = await prisma.savedConnection.findUnique({ where: { id } });
+    row = await prisma.savedConnection.findFirst({ where: { id, ownerId } });
   } catch {
-    row = fallbackFindConnection(id);
+    row = fallbackFindConnection(ownerId, id);
   }
-  if (!row) throw new Error("Connection not found");
+  if (!row) throw new NotFoundError();
   return {
     engine: normalizeEngine(row.engine),
     host: row.host ?? undefined,

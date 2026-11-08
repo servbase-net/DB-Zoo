@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Play, TerminalSquare, X } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { PaginationControls } from "@/components/db-manager/workspace/pagination
 import { EmptyState } from "@/components/db-manager/workspace/empty-state";
 import { SelectionToolbar } from "@/components/db-manager/workspace/selection-toolbar";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { formatCell } from "@/lib/format";
 
 type MetaResponse = {
   columns: {
@@ -70,6 +71,9 @@ export function TableBrowser({
   const [loadingRows, setLoadingRows] = useState(false);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("");
+  const [appliedFilter, setAppliedFilter] = useState("");
+  const rowsRequestId = useRef(0);
+  const committingEdit = useRef(false);
   const [newRow, setNewRow] = useState<Record<string, string>>({});
   const [importPayload, setImportPayload] = useState("");
   const [importFormat, setImportFormat] = useState<"csv" | "sql">("csv");
@@ -102,27 +106,11 @@ export function TableBrowser({
     [meta],
   );
   const gridColumns = useMemo(
-    () => (rows?.rows[0] ? Object.keys(rows.rows[0]) : meta?.columns.map((column) => column.name) ?? []),
-    [rows?.rows, meta?.columns],
+    () => (meta ? meta.columns.map((column) => column.name) : rows?.rows[0] ? Object.keys(rows.rows[0]) : []),
+    [rows, meta],
   );
 
-  const sortedRows = useMemo(() => {
-    const base = [...(rows?.rows ?? [])];
-    if (!sortBy) return base;
-    base.sort((a, b) => {
-      const av = a[sortBy];
-      const bv = b[sortBy];
-      if (av === bv) return 0;
-      if (av === null || av === undefined) return 1;
-      if (bv === null || bv === undefined) return -1;
-      const aString = String(av).toLowerCase();
-      const bString = String(bv).toLowerCase();
-      if (aString === bString) return 0;
-      const cmp = aString > bString ? 1 : -1;
-      return sortDirection === "asc" ? cmp : -cmp;
-    });
-    return base;
-  }, [rows?.rows, sortBy, sortDirection]);
+  const sortedRows = useMemo(() => rows?.rows ?? [], [rows?.rows]);
 
   const getRowKey = useCallback(
     (row: Record<string, unknown>, idx: number) => {
@@ -143,24 +131,59 @@ export function TableBrowser({
     [rowKeyMap, selectedRowKeys],
   );
 
+  const rowsUrl = `/api/tables/${encodeURIComponent(connectionId)}/${encodeURIComponent(database)}/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/rows`;
+
   const loadMeta = useCallback(async () => {
-    const qs = new URLSearchParams({ sessionId: connectionId, database, schema, table });
-    const res = await fetch(`/api/tables/meta?${qs.toString()}`);
-    const payload = await res.json();
-    if (payload.ok) setMeta(payload.data);
+    try {
+      const qs = new URLSearchParams({ sessionId: connectionId, database, schema, table });
+      const res = await fetch(`/api/tables/meta?${qs.toString()}`);
+      const payload = await res.json();
+      if (payload.ok) setMeta(payload.data);
+      else toast.error(payload.error ?? "Could not load table structure");
+    } catch {
+      toast.error("Could not load table structure");
+    }
   }, [connectionId, database, schema, table]);
 
   const loadRows = useCallback(async () => {
+    const requestId = ++rowsRequestId.current;
     setLoadingRows(true);
     try {
-      const qs = new URLSearchParams({ page: String(page), pageSize: "50", filter });
-      const res = await fetch(`/api/tables/${connectionId}/${database}/${schema}/${table}/rows?${qs.toString()}`);
+      const qs = new URLSearchParams({ page: String(page), pageSize: "50", filter: appliedFilter });
+      if (sortBy) {
+        qs.set("sortBy", sortBy);
+        qs.set("sortDirection", sortDirection);
+      }
+      const res = await fetch(`${rowsUrl}?${qs.toString()}`);
       const payload = await res.json();
+      if (requestId !== rowsRequestId.current) return; // a newer request superseded this one
       if (payload.ok) setRows(payload.data);
+      else toast.error(payload.error ?? "Could not load rows");
+    } catch {
+      if (requestId === rowsRequestId.current) toast.error("Could not load rows");
     } finally {
-      setLoadingRows(false);
+      if (requestId === rowsRequestId.current) setLoadingRows(false);
     }
-  }, [connectionId, database, schema, table, page, filter]);
+  }, [rowsUrl, page, appliedFilter, sortBy, sortDirection]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedFilter(filter);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filter]);
+
+  useEffect(() => {
+    setPage(1);
+    setFilter("");
+    setAppliedFilter("");
+    setSortBy(undefined);
+    setSortDirection("asc");
+    setRows(null);
+    setMeta(null);
+    setEditingCell(null);
+  }, [connectionId, database, schema, table]);
 
   useEffect(() => {
     setContext({ database, schema });
@@ -194,7 +217,7 @@ export function TableBrowser({
 
   useEffect(() => {
     setSelectedRowKeys(new Set());
-  }, [rows?.rows, page, filter]);
+  }, [rows?.rows]);
 
   useEffect(() => {
     setInlineTableQuery(`SELECT * FROM ${table} LIMIT 50;`);
@@ -233,6 +256,13 @@ export function TableBrowser({
     if (!trimmed) return undefined;
     if (trimmed.toLowerCase() === "null") return null;
     const type = (getColumnMeta(column)?.type ?? "").toLowerCase();
+    if (type.includes("json")) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return raw;
+      }
+    }
     if (/(int|decimal|numeric|float|double|real)/.test(type)) {
       const parsed = Number(trimmed);
       if (!Number.isNaN(parsed)) return parsed;
@@ -244,8 +274,15 @@ export function TableBrowser({
     return raw;
   }
 
-  function parseEditedValue(raw: string, original: unknown): unknown {
+  function parseEditedValue(raw: string, original: unknown, column: string): unknown {
     if (raw.trim().toLowerCase() === "null") return null;
+    if (typeof original === "object" || (getColumnMeta(column)?.type ?? "").toLowerCase().includes("json")) {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw; // the server stores non-JSON text in a json column as a JSON string
+      }
+    }
     if (typeof original === "number") {
       const parsed = Number(raw);
       return Number.isNaN(parsed) ? original : parsed;
@@ -270,7 +307,7 @@ export function TableBrowser({
       toast.error("Enter at least one value before inserting");
       return;
     }
-    const res = await fetch(`/api/tables/${connectionId}/${database}/${schema}/${table}/rows`, {
+    const res = await fetch(rowsUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "insert", row: rowPayload }),
@@ -285,19 +322,23 @@ export function TableBrowser({
     await loadRows();
   }
 
-  async function duplicateRow(row: Record<string, unknown>) {
-    const res = await fetch(`/api/tables/${connectionId}/${database}/${schema}/${table}/rows`, {
+  async function duplicateRow(row: Record<string, unknown>, quiet = false) {
+    const copy = Object.fromEntries(Object.entries(row).filter(([column]) => !isAutoGeneratedColumn(column)));
+    const res = await fetch(rowsUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "duplicate", row }),
+      body: JSON.stringify({ mode: "duplicate", row: copy }),
     });
     const payload = await res.json();
     if (!payload.ok) {
       toast.error(payload.error ?? "Duplicate failed");
-      return;
+      return false;
     }
-    toast.success("Row duplicated");
-    await loadRows();
+    if (!quiet) {
+      toast.success("Row duplicated");
+      await loadRows();
+    }
+    return true;
   }
 
   function getPrimaryKeyPayload(row: Record<string, unknown>) {
@@ -309,13 +350,13 @@ export function TableBrowser({
     return payload;
   }
 
-  async function removeRow(row: Record<string, unknown>) {
+  async function removeRow(row: Record<string, unknown>, quiet = false) {
     const primaryKeyPayload = getPrimaryKeyPayload(row);
     if (!primaryKeyPayload) {
       toast.error("Delete requires a primary key column");
-      return;
+      return false;
     }
-    const res = await fetch(`/api/tables/${connectionId}/${database}/${schema}/${table}/rows`, {
+    const res = await fetch(rowsUrl, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ primaryKey: primaryKeyPayload }),
@@ -323,17 +364,28 @@ export function TableBrowser({
     const payload = await res.json();
     if (!payload.ok) {
       toast.error(payload.error ?? "Delete failed");
-      return;
+      return false;
     }
-    toast.success("Row deleted");
-    await loadRows();
+    if (!quiet) {
+      toast.success("Row deleted");
+      if (sortedRows.length === 1 && page > 1) setPage(page - 1);
+      else await loadRows();
+    }
+    return true;
   }
 
   async function commitCellEdit() {
-    if (!editingCell) {
-      setEditingCell(null);
-      return;
+    // Enter and blur both call this; only the first may run.
+    if (committingEdit.current || !editingCell) return;
+    committingEdit.current = true;
+    try {
+      await saveCellEdit(editingCell);
+    } finally {
+      committingEdit.current = false;
     }
+  }
+
+  async function saveCellEdit(editingCell: { row: Record<string, unknown>; rowKey: string; column: string }) {
     const primaryKeyPayload = getPrimaryKeyPayload(editingCell.row);
     if (!primaryKeyPayload) {
       setEditingCell(null);
@@ -341,13 +393,13 @@ export function TableBrowser({
       return;
     }
     const originalValue = editingCell.row[editingCell.column];
-    const nextValue = parseEditedValue(editValue, originalValue);
-    if (Object.is(originalValue, nextValue)) {
+    const nextValue = parseEditedValue(editValue, originalValue, editingCell.column);
+    if (Object.is(originalValue, nextValue) || formatCell(originalValue) === formatCell(nextValue)) {
       setEditingCell(null);
       return;
     }
-    const payloadRow = { ...editingCell.row, [editingCell.column]: nextValue };
-    const res = await fetch(`/api/tables/${connectionId}/${database}/${schema}/${table}/rows`, {
+    const payloadRow = { [editingCell.column]: nextValue };
+    const res = await fetch(rowsUrl, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -360,22 +412,13 @@ export function TableBrowser({
       toast.error(payload.error ?? "Update failed");
       return;
     }
-    // Comment out, this works but flickers. replaced with better
-    // setEditingCell(null);
-    // toast.success("Cell updated");
-    // await loadRows();
-
     setRows((prev) => {
       if (!prev) return prev;
 
       return {
         ...prev,
         rows: prev.rows.map((currentRow) => {
-          const matches = primaryKeys.every(
-            (key) => currentRow[key] === editingCell.row[key]
-          );
-
-          if (!matches) return currentRow;
+          if (currentRow !== editingCell.row) return currentRow;
 
           return {
             ...currentRow,
@@ -474,6 +517,7 @@ export function TableBrowser({
   }
 
   function handleSort(column: string) {
+    setPage(1);
     if (sortBy !== column) {
       setSortBy(column);
       setSortDirection("asc");
@@ -495,19 +539,28 @@ export function TableBrowser({
   async function duplicateSelectedRows() {
     const targets = sortedRows.filter((row, idx) => selectedRowKeys.has(rowKeyMap[idx]));
     if (targets.length === 0) return;
+    let done = 0;
     for (const row of targets) {
-      await duplicateRow(row);
+      if (!(await duplicateRow(row, true))) break;
+      done++;
     }
+    if (done > 0) toast.success(`${done} row(s) duplicated`);
     setSelectedRowKeys(new Set());
+    await loadRows();
   }
 
   async function deleteSelectedRows() {
     const targets = sortedRows.filter((row, idx) => selectedRowKeys.has(rowKeyMap[idx]));
     if (targets.length === 0) return;
+    let done = 0;
     for (const row of targets) {
-      await removeRow(row);
+      if (!(await removeRow(row, true))) break;
+      done++;
     }
+    if (done > 0) toast.success(`${done} row(s) deleted`);
     setSelectedRowKeys(new Set());
+    if (done === sortedRows.length && page > 1) setPage(page - 1);
+    else await loadRows();
   }
 
   function askForConfirmation(title: string, description: string, action: () => Promise<void>) {
@@ -699,7 +752,7 @@ export function TableBrowser({
                               {tabQueryResult.rows.map((row, idx) => (
                                 <tr key={idx}>
                                   {(tabQueryResult.columns ?? Object.keys(row)).map((col) => (
-                                    <TD key={`${idx}-${col}`}>{String(row[col] ?? "")}</TD>
+                                    <TD key={`${idx}-${col}`}>{formatCell(row[col])}</TD>
                                   ))}
                                 </tr>
                               ))}

@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/security/encryption";
 import type { ConnectionInput, DatabaseEngine } from "@/lib/types/db";
 import { ACTIVE_SESSION_COOKIE } from "@/lib/session/constants";
-import { fallbackCreateSession, fallbackGetSession, fallbackListSessions } from "@/lib/services/fallback-store";
+import { SESSION_TTL_MS } from "@/lib/session/owner";
+import { fallbackCreateSession, fallbackGetSession } from "@/lib/services/fallback-store";
 
-const SESSION_TTL_HOURS = 12;
 
 function normalizeEngine(engine: string): DatabaseEngine {
   if (engine === "mysql" || engine === "mariadb" || engine === "postgresql" || engine === "sqlite") {
@@ -17,8 +17,9 @@ function normalizeEngine(engine: string): DatabaseEngine {
 
 export async function createConnectionSession(input: ConnectionInput, label?: string) {
   let sessionId: string = randomUUID();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   try {
+    await prisma.connectionSession.deleteMany({ where: { expiresAt: { lte: new Date() } } });
     await prisma.connectionSession.create({
       data: {
         id: sessionId,
@@ -52,35 +53,15 @@ export async function createConnectionSession(input: ConnectionInput, label?: st
   return sessionId;
 }
 
-export async function listActiveSessions() {
-  try {
-    await prisma.connectionSession.deleteMany({
-      where: { expiresAt: { lte: new Date() } },
-    });
-    return prisma.connectionSession.findMany({
-      orderBy: { updatedAt: "desc" },
-    });
-  } catch {
-    return fallbackListSessions().map((session) => ({
-      id: session.id,
-      label: session.label,
-      engine: session.input.engine,
-      host: session.input.host ?? null,
-      port: session.input.port ?? null,
-      username: session.input.username ?? null,
-      encryptedPassword: session.input.password ? encryptString(session.input.password) : null,
-      databaseName: session.input.databaseName ?? null,
-      sqlitePath: session.input.sqlitePath ?? null,
-      readOnly: Boolean(session.input.readOnly),
-      expiresAt: session.expiresAt,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-    }));
-  }
+/** A session id in a URL or body only works for the browser that owns it (matches its cookie). */
+export async function assertOwnSession(sessionId: string) {
+  const fromCookie = (await cookies()).get(ACTIVE_SESSION_COOKIE)?.value;
+  if (!fromCookie || fromCookie !== sessionId) throw new Error("Session not found or expired");
 }
 
 export async function getConnectionInputFromSession(sessionId?: string): Promise<ConnectionInput | null> {
   const fromCookie = (await cookies()).get(ACTIVE_SESSION_COOKIE)?.value;
+  if (sessionId) await assertOwnSession(sessionId);
   const id = sessionId ?? fromCookie;
   if (!id) return null;
   let session = null as Awaited<ReturnType<typeof prisma.connectionSession.findUnique>> | null;

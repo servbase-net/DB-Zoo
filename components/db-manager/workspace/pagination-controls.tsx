@@ -40,7 +40,7 @@ export function PaginationControls({
           size="sm"
           className="h-7 w-7 border-neutral-300 bg-neutral-100 p-0 dark:border-neutral-700 dark:bg-neutral-900"
           onClick={onNext}
-          disabled={totalRows < page * pageSize}
+          disabled={totalRows <= page * pageSize}
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </Button>

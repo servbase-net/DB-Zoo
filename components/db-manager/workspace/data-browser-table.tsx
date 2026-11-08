@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
+import { formatCell } from "@/lib/format";
 
 export type SortDirection = "asc" | "desc";
 
@@ -141,7 +142,7 @@ export function DataBrowserTable({
             </tr>
           ) : null}
 
-          {rows.map((row, rowIdx) => {
+          {(loading && rows.length === 0 ? [] : rows).map((row, rowIdx) => {
             const rowKey = rowKeyMap[rowIdx] ?? String(rowIdx);
             return (
               <tr
@@ -182,16 +183,20 @@ export function DataBrowserTable({
                         <button
                           type="button"
                           className="flex h-full min-h-[36px] w-full items-center truncate px-2 text-left font-mono text-xs text-neutral-700 hover:bg-neutral-200/70 dark:text-neutral-200 dark:hover:bg-neutral-700/70"
-                          title={String(value ?? "")}
-                          onClick={() => onStartEdit(row, rowKey, column, String(value ?? ""))}
+                          title={formatCell(value)}
+                          onClick={() => onStartEdit(row, rowKey, column, formatCell(value))}
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {
                               event.preventDefault();
-                              onStartEdit(row, rowKey, column, String(value ?? ""));
+                              onStartEdit(row, rowKey, column, formatCell(value));
                             }
                           }}
                         >
-                          {String(value ?? "")}
+                          {value === null || value === undefined ? (
+                            <span className="text-neutral-400 italic dark:text-neutral-600">NULL</span>
+                          ) : (
+                            formatCell(value)
+                          )}
                         </button>
                       )}
                     </TD>

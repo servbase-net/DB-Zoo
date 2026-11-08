@@ -1,0 +1,10 @@
+allowBuilds:
+  better-sqlite3: true
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+overrides:
+  dompurify: ">=3.4.17"

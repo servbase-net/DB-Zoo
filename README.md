@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="./public/branding/db-zoo-2.png" alt="DB Zoo" width="250" />
 </p>
 
@@ -42,9 +42,9 @@ DB Zoo takes a modern approach:
 ## 📦 Installation
 
 ```bash
-npm install
-npx prisma migrate dev
-npm run dev
+pnpm install
+pnpm exec prisma migrate deploy
+pnpm dev
 ```
 
 ---
@@ -52,7 +52,7 @@ npm run dev
 ## 🏃 Run
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Open your browser and start managing your databases.
@@ -62,8 +62,16 @@ Open your browser and start managing your databases.
 ## 🏗️ Build
 
 ```bash
-npm run build
+pnpm build
+pnpm start
 ```
+
+---
+
+## 🧰 Requirements
+
+- Node.js 20+ (tested on 24)
+- [pnpm](https://pnpm.io) 10+ (`corepack enable` is enough)
 
 ---
 
@@ -89,7 +97,7 @@ SESSION_SECRET="dev-session-secret"
 
 | Layer        | Technology                          |
 |-------------|------------------------------------|
-| Frontend    | Next.js 14 (App Router), Tailwind  |
+| Frontend    | Next.js 16 (App Router), React 19, Tailwind 3 |
 | Language    | TypeScript                         |
 | Backend     | Route Handlers (API)               |
 | Database    | Prisma (metadata DB)               |
@@ -135,6 +143,8 @@ db-zoo/
 ## 📝 Notes
 
 - 🔐 Credentials are **encrypted on save** and never returned to clients
+- ⏱️ Connection sessions expire after **24 hours** and are cleaned up automatically
+- 👤 Saved connections are private to the browser that saved them (anonymous owner cookie, also 24 hours)
 - 🛡️ Read-only connections block destructive queries
 - 🧩 Some advanced operations are scaffolded for future engine-specific implementations
 - 🗃️ Metadata DB is **separate from managed connections**

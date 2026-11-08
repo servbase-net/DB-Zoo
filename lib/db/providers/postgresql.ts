@@ -31,15 +31,60 @@ function getPgClientCtor(): PgClientCtor {
 
 function getClient(input: ConnectionInput, database?: string) {
   const Client = getPgClientCtor();
-  return new Client({
+  const client = new Client({
     host: input.host,
     port: input.port ?? 5432,
     user: input.username,
     password: input.password,
     database: database ?? input.databaseName,
     connectionTimeoutMillis: 5000,
+    statement_timeout: 60000,
   });
+  // Every method opens its own short-lived client. Closing on a failed query stops
+  // connections leaking when the method throws before reaching its own end().
+  const query = client.query.bind(client);
+  client.query = async (...args: Parameters<typeof query>) => {
+    try {
+      return await query(...args);
+    } catch (error) {
+      void client.end().catch(() => {});
+      throw error;
+    }
+  };
+  return client;
 }
+
+type PgClient = ReturnType<typeof getClient>;
+
+/** json/jsonb params must be sent as JSON text; node-pg would turn arrays into Postgres arrays. */
+async function toPgParams(client: PgClient, schema: string, table: string, row: Record<string, unknown>) {
+  const types = await client.query(
+    "SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+    [schema, table],
+  );
+  const jsonColumns = new Set(
+    types.rows.filter((r) => r.udt_name === "json" || r.udt_name === "jsonb").map((r) => r.column_name as string),
+  );
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) out[key] = null;
+    else if (jsonColumns.has(key)) {
+      if (typeof value === "string") {
+        // valid JSON text is used as is, anything else is stored as a JSON string
+        try {
+          JSON.parse(value);
+          out[key] = value;
+        } catch {
+          out[key] = JSON.stringify(value);
+        }
+      } else out[key] = JSON.stringify(value);
+    } else if (typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) out[key] = JSON.stringify(value);
+    else out[key] = value;
+  }
+  return out;
+}
+
+import { parseColumnFilter } from "@/lib/db/filter";
 
 function quoteIdent(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
@@ -181,7 +226,7 @@ export class PostgreSqlProvider implements DatabaseProvider {
   async listDatabases(input: ConnectionInput) {
     const client = getClient(input, "postgres");
     await client.connect();
-    const res = await client.query(`SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname`);
+    const res = await client.query(`SELECT datname FROM pg_database WHERE datistemplate = false AND has_database_privilege(datname, 'CONNECT') ORDER BY datname`);
     await client.end();
     return res.rows.map((row) => ({ name: row.datname as string }));
   }
@@ -194,6 +239,7 @@ export class PostgreSqlProvider implements DatabaseProvider {
       SELECT schema_name FROM information_schema.schemata
       WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
       AND schema_name NOT LIKE 'pg_temp%' AND schema_name NOT LIKE 'pg_toast_temp%'
+      AND has_schema_privilege(quote_ident(schema_name), 'USAGE')
       ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name
     `);
     await client.end();
@@ -226,7 +272,7 @@ export class PostgreSqlProvider implements DatabaseProvider {
 
     const [colsRes, pkRes] = await Promise.all([
       client.query(`
-        SELECT column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length, numeric_precision, numeric_scale
+        SELECT column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length, numeric_precision, numeric_scale, is_identity, is_generated
         FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`, 
         [schema, args.table]
       ),
@@ -252,7 +298,10 @@ export class PostgreSqlProvider implements DatabaseProvider {
         nullable: row.is_nullable === "YES",
         defaultValue: row.column_default as string | null,
         isPrimaryKey: pkSet.has(row.column_name),
-        isAutoIncrement: typeof row.column_default === "string" && row.column_default.startsWith("nextval"),
+        isAutoIncrement:
+          row.is_identity === "YES" ||
+          row.is_generated === "ALWAYS" ||
+          (typeof row.column_default === "string" && row.column_default.startsWith("nextval")),
       };
     });
   }
@@ -310,9 +359,17 @@ export class PostgreSqlProvider implements DatabaseProvider {
     await client.connect();
     const offset = (args.options.page - 1) * args.options.pageSize;
     const order = args.options.sortBy ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}` : "";
-    const rowsRes = await client.query(`SELECT * FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} ${order} LIMIT $1 OFFSET $2`, [args.options.pageSize, offset]);
-    const countRes = await client.query(`SELECT COUNT(*)::int AS total FROM ${quoteIdent(schema)}.${quoteIdent(args.table)}`);
-    await client.end();
+    const f = parseColumnFilter(args.options.filter);
+    const where = f ? `WHERE ${quoteIdent(f.column)}::text = $1` : "";
+    const fp = f ? [f.value] : [];
+    const tbl = `${quoteIdent(schema)}.${quoteIdent(args.table)}`;
+    let rowsRes, countRes;
+    try {
+      rowsRes = await client.query(`SELECT * FROM ${tbl} ${where} ${order} LIMIT $${fp.length + 1} OFFSET $${fp.length + 2}`, [...fp, args.options.pageSize, offset]);
+      countRes = await client.query(`SELECT COUNT(*)::int AS total FROM ${tbl} ${where}`, fp);
+    } finally {
+      await client.end();
+    }
     return { rows: rowsRes.rows, total: Number(countRes.rows[0]?.total ?? 0), page: args.options.page, pageSize: args.options.pageSize };
   }
 
@@ -321,6 +378,9 @@ export class PostgreSqlProvider implements DatabaseProvider {
     const client = getClient(input, input.databaseName);
     await client.connect();
     try {
+      if (input.searchPath?.trim()) {
+        await client.query("SELECT set_config('search_path', $1, false)", [quoteIdent(input.searchPath)]);
+      }
       const statements = splitSqlStatements(query);
       let lastResult: any = null;
       if (statements.length > 1) {
@@ -392,10 +452,14 @@ export class PostgreSqlProvider implements DatabaseProvider {
     const schema = args.schema ?? "public";
     const client = getClient(input, db);
     await client.connect();
-    const columnsSql = keys.map(quoteIdent).join(", ");
-    const valuesSql = keys.map((_, idx) => `$${idx + 1}`).join(", ");
-    await client.query(`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(args.table)} (${columnsSql}) VALUES (${valuesSql})`, keys.map(k => args.row[k] ?? null));
-    await client.end();
+    try {
+      const row = await toPgParams(client, schema, args.table, args.row);
+      const columnsSql = keys.map(quoteIdent).join(", ");
+      const valuesSql = keys.map((_, idx) => `$${idx + 1}`).join(", ");
+      await client.query(`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(args.table)} (${columnsSql}) VALUES (${valuesSql})`, keys.map((k) => row[k] ?? null));
+    } finally {
+      await client.end().catch(() => {});
+    }
   }
 
   async updateRow(input: ConnectionInput, args: Parameters<DatabaseProvider["updateRow"]>[1]): Promise<void> {
@@ -418,12 +482,17 @@ export class PostgreSqlProvider implements DatabaseProvider {
     const pkKeys = args.primaryKey ? Object.keys(args.primaryKey) : [];
     const setKeys = Object.keys(args.row).filter(k => !pkKeys.includes(k));
     if (setKeys.length === 0) { await client.end(); return; }
-    const setSql = setKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(", ");
-    const offset = setKeys.length;
-    const finalWhere = args.where ? whereClause : Object.keys(args.primaryKey!).map((key, idx) => `${quoteIdent(key)} = $${idx + offset + 1}`).join(" AND ");
-    const allValues = [...setKeys.map(k => args.row[k] ?? null), ...whereValues];
-    await client.query(`UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${finalWhere}`, allValues);
-    await client.end();
+    try {
+      const row = await toPgParams(client, schema, args.table, args.row);
+      const setSql = setKeys.map((key, idx) => `${quoteIdent(key)} = $${idx + 1}`).join(", ");
+      const offset = setKeys.length;
+      const finalWhere = args.where ? whereClause : Object.keys(args.primaryKey!).map((key, idx) => `${quoteIdent(key)} = $${idx + offset + 1}`).join(" AND ");
+      const allValues = [...setKeys.map((k) => row[k] ?? null), ...whereValues];
+      const res = await client.query(`UPDATE ${quoteIdent(schema)}.${quoteIdent(args.table)} SET ${setSql} WHERE ${finalWhere}`, allValues);
+      if (res.rowCount === 0) throw new Error("No row was updated. It may have been changed or deleted.");
+    } finally {
+      await client.end().catch(() => {});
+    }
   }
 
   async deleteRow(input: ConnectionInput, args: Parameters<DatabaseProvider["deleteRow"]>[1]): Promise<void> {
@@ -443,8 +512,12 @@ export class PostgreSqlProvider implements DatabaseProvider {
     } else {
       throw new Error("Delete requires a primary key column.");
     }
-    await client.query(`DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereClause}`, whereValues);
-    await client.end();
+    try {
+      const res = await client.query(`DELETE FROM ${quoteIdent(schema)}.${quoteIdent(args.table)} WHERE ${whereClause}`, whereValues);
+      if (res.rowCount === 0) throw new Error("No row was deleted. It may have been changed or deleted already.");
+    } finally {
+      await client.end().catch(() => {});
+    }
   }
 
   async exportTable(input: ConnectionInput, args: Parameters<DatabaseProvider["exportTable"]>[1]): Promise<{ data: string; mimeType: string }> {
@@ -514,8 +587,14 @@ export class PostgreSqlProvider implements DatabaseProvider {
     const test = await this.testConnection(input);
     const client = getClient(input, input.databaseName ?? "postgres");
     await client.connect();
-    const enc = await client.query("SHOW server_encoding"), coll = await client.query("SHOW lc_collate");
-    await client.end();
+    let enc, coll;
+    try {
+      enc = await client.query("SHOW server_encoding");
+      // The lc_collate setting is gone in newer Postgres; the catalog works on all versions.
+      coll = await client.query("SELECT datcollate AS lc_collate FROM pg_database WHERE datname = current_database()");
+    } finally {
+      await client.end();
+    }
     return { engine: "postgresql" as const, version: test.serverVersion ?? "unknown", charset: enc.rows[0]?.server_encoding ?? "UTF8", collation: coll.rows[0]?.lc_collate ?? "en_US.UTF-8", capabilities: ["query", "schemas", "json", "roles", "import", "export", "transactions"] };
   }
 }

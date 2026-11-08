@@ -39,6 +39,8 @@ function buildConfig(input: ConnectionInput, extra: Record<string, unknown> = {}
   };
 }
 
+import { parseColumnFilter } from "@/lib/db/filter";
+
 function quoteIdent(value: string) {
   return `\`${value.replace(/`/g, "``")}\``;
 }
@@ -175,12 +177,20 @@ export class MySqlProvider implements DatabaseProvider {
     const order = args.options.sortBy
       ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}`
       : "";
-    const [countRows] = await conn.query(`SELECT COUNT(*) as total FROM ${quoteIdent(args.table)}`);
+    const f = parseColumnFilter(args.options.filter);
+    const where = f ? `WHERE ${quoteIdent(f.column)} = ?` : "";
+    const params = f ? [f.value] : [];
     const offset = (args.options.page - 1) * args.options.pageSize;
-    const [rows] = await conn.query(
-      `SELECT * FROM ${quoteIdent(args.table)} ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
-    );
-    await conn.end();
+    let countRows, rows;
+    try {
+      [countRows] = await conn.query(`SELECT COUNT(*) as total FROM ${quoteIdent(args.table)} ${where}`, params);
+      [rows] = await conn.query(
+        `SELECT * FROM ${quoteIdent(args.table)} ${where} ${order} LIMIT ${args.options.pageSize} OFFSET ${offset}`,
+        params,
+      );
+    } finally {
+      await conn.end();
+    }
     return {
       rows: rows as Record<string, unknown>[],
       total: Number((countRows as Array<{ total: number }>)[0]?.total ?? 0),

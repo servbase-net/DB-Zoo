@@ -4,6 +4,7 @@ import type { AppRole } from "@/lib/types/auth";
 
 type SavedConnectionRecord = {
   id: string;
+  ownerId: string;
   name: string;
   engine: ConnectionInput["engine"];
   host?: string;
@@ -77,24 +78,24 @@ export function fallbackSaveConnection(input: Omit<SavedConnectionRecord, "id" |
   return row;
 }
 
-export function fallbackListConnections() {
-  return store().savedConnections;
+export function fallbackListConnections(ownerId: string) {
+  return store().savedConnections.filter((row) => row.ownerId === ownerId);
 }
 
-export function fallbackUpdateConnection(id: string, patch: Partial<SavedConnectionRecord>) {
-  const idx = store().savedConnections.findIndex((row) => row.id === id);
+export function fallbackUpdateConnection(ownerId: string, id: string, patch: Partial<SavedConnectionRecord>) {
+  const idx = store().savedConnections.findIndex((row) => row.id === id && row.ownerId === ownerId);
   if (idx < 0) throw new Error("Connection not found");
   const next = { ...store().savedConnections[idx], ...patch, updatedAt: new Date() };
   store().savedConnections[idx] = next;
   return next;
 }
 
-export function fallbackDeleteConnection(id: string) {
-  store().savedConnections = store().savedConnections.filter((row) => row.id !== id);
+export function fallbackDeleteConnection(ownerId: string, id: string) {
+  store().savedConnections = store().savedConnections.filter((row) => !(row.id === id && row.ownerId === ownerId));
 }
 
-export function fallbackFindConnection(id: string) {
-  return store().savedConnections.find((row) => row.id === id) ?? null;
+export function fallbackFindConnection(ownerId: string, id: string) {
+  return store().savedConnections.find((row) => row.id === id && row.ownerId === ownerId) ?? null;
 }
 
 export function fallbackCreateSession(input: { label: string; connection: ConnectionInput; expiresAt: Date }) {

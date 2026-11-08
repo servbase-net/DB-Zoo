@@ -9,6 +9,8 @@ export type ConnectionInput = {
   databaseName?: string;
   sqlitePath?: string;
   readOnly?: boolean;
+  /** Set per request (never stored): Postgres schema to use as search_path. */
+  searchPath?: string;
 };
 
 export type ConnectionStatus = {

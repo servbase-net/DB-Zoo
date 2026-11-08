@@ -29,6 +29,8 @@ function getDb(input: ConnectionInput) {
   return new Database(input.sqlitePath, { readonly: Boolean(input.readOnly) });
 }
 
+import { parseColumnFilter } from "@/lib/db/filter";
+
 function quoteIdent(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -117,11 +119,18 @@ export class SqliteProvider implements DatabaseProvider {
     const db = getDb(input);
     const offset = (args.options.page - 1) * args.options.pageSize;
     const order = args.options.sortBy
-      ? `ORDER BY "${args.options.sortBy}" ${args.options.sortDirection ?? "asc"}`
+      ? `ORDER BY ${quoteIdent(args.options.sortBy)} ${args.options.sortDirection ?? "asc"}`
       : "";
-    const rows = db.prepare(`SELECT * FROM "${args.table}" ${order} LIMIT ? OFFSET ?`).all(args.options.pageSize, offset);
-    const total = Number((db.prepare(`SELECT COUNT(*) as total FROM "${args.table}"`).get() as { total: number }).total);
-    db.close();
+    const f = parseColumnFilter(args.options.filter);
+    const where = f ? `WHERE ${quoteIdent(f.column)} = ?` : "";
+    const fp = f ? [f.value] : [];
+    let rows, total;
+    try {
+      rows = db.prepare(`SELECT * FROM ${quoteIdent(args.table)} ${where} ${order} LIMIT ? OFFSET ?`).all(...fp, args.options.pageSize, offset);
+      total = Number((db.prepare(`SELECT COUNT(*) as total FROM ${quoteIdent(args.table)} ${where}`).get(...fp) as { total: number }).total);
+    } finally {
+      db.close();
+    }
     return {
       rows: rows as Record<string, unknown>[],
       total,

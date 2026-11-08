@@ -1,8 +1,8 @@
-﻿"use client";
+"use client";
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Play, Search, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Copy, Download, Play, Search, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { useActiveSession } from "@/hooks/use-active-session";
@@ -14,6 +14,7 @@ import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { classifyQueryRisk } from "@/lib/db/query-safety";
 import { cn } from "@/lib/utils";
+import { formatCell, rowsToCsv } from "@/lib/format";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -22,12 +23,15 @@ type QueryResultPayload = {
   rows?: Record<string, unknown>[];
   durationMs: number;
   affectedRows?: number;
+  truncated?: boolean;
+  totalRows?: number;
 };
 
 type HistoryItem = {
   id: string;
   queryText: string;
   success: boolean;
+  errorMessage?: string | null;
   durationMs: number;
   executedAt: string;
 };
@@ -127,11 +131,19 @@ export function QueryWorkbench() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historySearch, setHistorySearch] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // SQL that will run: the editor selection if there is one, otherwise the whole editor.
+  const pendingSql = useRef("");
+  const editorRef = useRef<any>(null);
+  const runRef = useRef<() => void>(() => {});
+  const schemaNames = useRef<string[]>([]);
 
   const monacoRef = useRef<any>(null);
   const completionProviderRef = useRef<{ dispose: () => void } | null>(null);
 
-  const risk = useMemo(() => classifyQueryRisk(query), [query]);
+  const [selection, setSelection] = useState("");
+  const sqlToRun = selection.trim() ? selection : query;
+  const risk = useMemo(() => classifyQueryRisk(sqlToRun), [sqlToRun]);
 
   const filteredHistory = useMemo(() => {
     const term = historySearch.trim().toLowerCase();
@@ -141,14 +153,32 @@ export function QueryWorkbench() {
 
   const loadHistory = useCallback(async () => {
     if (!sessionId) return;
-    const res = await fetch(`/api/query?sessionId=${sessionId}`);
-    const payload = await res.json();
-    if (payload.ok) setHistory(payload.data);
+    try {
+      const res = await fetch(`/api/query?sessionId=${encodeURIComponent(sessionId)}`);
+      const payload = await res.json();
+      if (payload.ok) setHistory(payload.data);
+    } catch {
+      // history is optional; the editor keeps working without it
+    }
   }, [sessionId]);
 
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  // Table names for autocomplete.
+  useEffect(() => {
+    if (!sessionId) return;
+    const qs = new URLSearchParams({ sessionId, objectsPageSize: "500", objectsKind: "all" });
+    if (database) qs.set("database", database);
+    if (schema) qs.set("schema", schema);
+    fetch(`/api/explorer?${qs.toString()}`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (payload.ok) schemaNames.current = (payload.data.objects ?? []).map((o: { name: string }) => o.name);
+      })
+      .catch(() => {});
+  }, [sessionId, database, schema]);
 
   const defineMonacoThemes = useCallback((monaco: any) => {
     const define = (name: string, isDark: boolean) => {
@@ -199,12 +229,20 @@ export function QueryWorkbench() {
           endColumn: word.endColumn,
         };
 
-        const suggestions = SQL_KEYWORDS.map((keyword) => ({
-          label: keyword,
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: keyword,
-          range,
-        }));
+        const suggestions = [
+          ...SQL_KEYWORDS.map((keyword) => ({
+            label: keyword,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: keyword,
+            range,
+          })),
+          ...schemaNames.current.map((name) => ({
+            label: name,
+            kind: monaco.languages.CompletionItemKind.Struct,
+            insertText: /^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`,
+            range,
+          })),
+        ];
 
         return { suggestions };
       },
@@ -225,7 +263,14 @@ export function QueryWorkbench() {
       return;
     }
 
+    const sql = pendingSql.current.trim();
+    if (!sql) {
+      toast.error("Type a SQL query first");
+      return;
+    }
+
     setIsRunning(true);
+    setError(null);
 
     try {
       const res = await fetch("/api/query", {
@@ -233,7 +278,7 @@ export function QueryWorkbench() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          query,
+          query: sql,
           database: database || undefined,
           schema: schema || undefined,
         }),
@@ -242,43 +287,69 @@ export function QueryWorkbench() {
       const payload = await res.json();
 
       if (!payload.ok) {
-        toast.error(payload.error ?? "Query failed");
+        setError(payload.error ?? "Query failed");
+        void loadHistory();
         return;
       }
 
       setResult(payload.data);
       toast.success(`Executed in ${payload.data.durationMs}ms`);
       void loadHistory();
+    } catch {
+      setError("Could not reach the server");
     } finally {
       setIsRunning(false);
     }
-  }, [sessionId, query, database, schema, loadHistory]);
+  }, [sessionId, database, schema, loadHistory]);
 
   const run = useCallback(async () => {
-    if (risk === "destructive") {
+    const editor = editorRef.current;
+    const selected = editor?.getModel()?.getValueInRange(editor.getSelection()) ?? "";
+    pendingSql.current = selected.trim() ? selected : editor?.getValue() ?? query;
+    if (classifyQueryRisk(pendingSql.current) === "destructive") {
       setConfirmOpen(true);
       return;
     }
 
     await runUnsafe();
-  }, [risk, runUnsafe]);
+  }, [query, runUnsafe]);
+
+  useEffect(() => {
+    runRef.current = () => void run();
+  }, [run]);
 
   const handleEditorMount = useCallback(
     (editor: any, monaco: any) => {
       monacoRef.current = monaco;
+      editorRef.current = editor;
+      editor.onDidChangeCursorSelection(() => {
+        setSelection(editor.getModel()?.getValueInRange(editor.getSelection()) ?? "");
+      });
       defineMonacoThemes(monaco);
       registerSqlCompletionProvider(monaco);
       monaco.editor.setTheme(resolvedTheme === "dark" ? THEME_DARK : THEME_LIGHT);
 
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run());
+      // runRef: the command is registered once, so it must not capture a stale query
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => runRef.current());
     },
-    [defineMonacoThemes, registerSqlCompletionProvider, resolvedTheme, run]
+    [defineMonacoThemes, registerSqlCompletionProvider, resolvedTheme]
   );
 
   const resultColumns = useMemo(() => {
     if (!result) return [];
     return result.columns ?? Object.keys(result.rows?.[0] ?? {});
   }, [result]);
+
+  function downloadCsv() {
+    if (!result?.rows) return;
+    const blob = new Blob([rowsToCsv(resultColumns, result.rows)], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "query-result.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <>
@@ -303,7 +374,7 @@ export function QueryWorkbench() {
               <CardTitle>SQL Editor</CardTitle>
               <Button onClick={() => void run()} disabled={isRunning} className="w-full sm:w-auto">
                 <Play className="mr-2 h-4 w-4" />
-                {isRunning ? "Running…" : "Run (Ctrl/Cmd+Enter)"}
+                {isRunning ? "Running…" : selection.trim() ? "Run selection (Ctrl/Cmd+Enter)" : "Run (Ctrl/Cmd+Enter)"}
               </Button>
             </CardHeader>
 
@@ -312,6 +383,13 @@ export function QueryWorkbench() {
                 <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Destructive statement detected — confirm before execution.
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="min-w-0 whitespace-pre-wrap break-words font-mono text-xs">{error}</span>
                 </div>
               )}
 
@@ -362,6 +440,27 @@ export function QueryWorkbench() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Result</CardTitle>
+              {result?.rows?.length ? (
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" onClick={downloadCsv} title="Download CSV">
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    CSV
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Copy as CSV"
+                    onClick={() => {
+                      void navigator.clipboard
+                        .writeText(rowsToCsv(resultColumns, result.rows!))
+                        .then(() => toast.success("Copied"))
+                        .catch(() => toast.error("Copy failed"));
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : null}
               {result && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Clock className="h-3.5 w-3.5" />
@@ -392,18 +491,29 @@ export function QueryWorkbench() {
                               <TD
                                 key={`${idx}-${col}`}
                                 className="max-w-[260px] truncate"
-                                title={String(row[col] ?? "")}
+                                title={formatCell(row[col])}
                               >
-                                {String(row[col] ?? "")}
+                                {row[col] === null || row[col] === undefined ? (
+                                  <span className="italic text-muted-foreground">NULL</span>
+                                ) : (
+                                  formatCell(row[col])
+                                )}
                               </TD>
                             ))}
                           </tr>
                         ))}
                       </TBody>
                     </Table>
+                    {result.truncated && (
+                      <p className="border-t border-border p-2 text-xs text-muted-foreground">
+                        Showing the first {result.rows!.length.toLocaleString()} of {result.totalRows?.toLocaleString()} rows. Add a LIMIT to narrow it.
+                      </p>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Statement executed successfully.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {result.columns?.length ? "Query returned no rows." : "Statement executed successfully."}
+                  </p>
                 )
               ) : (
                 <p className="text-sm text-muted-foreground">Run a query to see results.</p>
@@ -437,7 +547,11 @@ export function QueryWorkbench() {
                   <button
                     key={entry.id}
                     type="button"
-                    onClick={() => setQuery(entry.queryText)}
+                    onClick={() => {
+                      setQuery(entry.queryText);
+                      setError(entry.success ? null : (entry.errorMessage ?? null));
+                    }}
+                    title={entry.errorMessage ?? undefined}
                     className="group w-full rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted"
                   >
                     <p className="line-clamp-2 break-all font-mono text-xs leading-relaxed">

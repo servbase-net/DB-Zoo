@@ -26,10 +26,10 @@ export async function GET(request: NextRequest, context: Params) {
       schema: params.schema,
       table: params.table,
       options: {
-        page: Number(qs.get("page") ?? 1),
-        pageSize: Number(qs.get("pageSize") ?? 25),
+        page: Math.max(1, Math.floor(Number(qs.get("page"))) || 1),
+        pageSize: Math.min(200, Math.max(1, Math.floor(Number(qs.get("pageSize"))) || 25)),
         sortBy: qs.get("sortBy") ?? undefined,
-        sortDirection: (qs.get("sortDirection") as "asc" | "desc" | null) ?? undefined,
+        sortDirection: qs.get("sortDirection") === "desc" ? "desc" : "asc", // whitelisted: interpolated into ORDER BY
         filter: qs.get("filter") ?? undefined,
       },
     });

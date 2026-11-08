@@ -62,7 +62,7 @@ export function DataBrowserHeader({
       <Input
         value={filter}
         onChange={(event) => onFilterChange(event.target.value)}
-        placeholder="Filter rows (eg: name=alice)"
+        placeholder="Filter by column, e.g. name=alice"
         className="h-8 border-neutral-200 bg-white text-xs dark:border-neutral-800 dark:bg-neutral-900"
       />
     </div>

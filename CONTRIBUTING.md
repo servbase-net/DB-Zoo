@@ -36,9 +36,9 @@ cd db-zoo
 ### 2. Install & run
 
 ```bash
-npm install
-npm run prisma:generate
-npm run dev
+pnpm install
+pnpm prisma:generate
+pnpm dev
 ```
 
 Boom — you're in.
@@ -90,8 +90,8 @@ DB Zoo deals with databases — so be careful.
 Make sure:
 
 ```bash
-npm run dev
-npm run build
+pnpm dev
+pnpm build
 ```
 
 ✔ No crashes  

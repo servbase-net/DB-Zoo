@@ -42,8 +42,8 @@ export const rowMutationSchema = z.object({
   database: z.string().optional(),
   schema: z.string().optional(),
   table: z.string().min(1),
-  row: z.record(z.any()),
-  primaryKey: z.record(z.any()).optional(),
+  row: z.record(z.string(), z.any()),
+  primaryKey: z.record(z.string(), z.any()).optional(),
 });
 
 export const importExportSchema = z.object({
